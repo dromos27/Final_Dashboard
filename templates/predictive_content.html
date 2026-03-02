@@ -1,0 +1,629 @@
+<!-- templates/predictive_content.html -->
+<div class="container-fluid py-4">
+    <h2 class="mb-4 text-dark border-bottom pb-2" style="border-color: #FFD700 !important;">Predictive Analytics</h2>
+
+    <!-- Main Content Area -->
+    <div class="row">
+        <!-- Left Column: Parameters and Recommendations -->
+        <div class="col-lg-4 mb-4">
+            <!-- Prediction Parameters Card -->
+            <div class="card mb-4 prediction-card" style="border: 2px solid #000000 !important; border-radius: 10px !important;">
+                <div class="card-header" style="background-color: #000000 !important; color: #FFD700 !important; font-weight: bold !important;">
+                    Prediction Parameters
+                </div>
+                <div class="card-body" style="background-color: #FFD700 !important;">
+                    <!-- Date Input -->
+                    <div class="mb-3">
+                        <label class="form-label fw-bold text-dark">Date</label>
+                        <input type="date" id="predict-date-picker" class="form-control"
+                               style="background-color: #FFFFFF !important; color: #212121 !important; border: 1px solid #E0E0E0 !important;"
+                               value="{{ default_date }}">
+                    </div>
+
+                    <!-- Room Selection -->
+                    <div class="mb-4">
+                        <label class="form-label fw-bold text-dark">Room</label>
+                        <select id="predict-room-dropdown" class="form-select"
+                                style="background-color: #FFFFFF !important; color: #212121 !important; border: 1px solid #E0E0E0 !important;">
+                            <!-- All rooms will be populated immediately by JavaScript -->
+                        </select>
+                    </div>
+
+                    <!-- Predict Button -->
+                    <button id="predict-button" class="btn w-100 fw-bold"
+                            style="background-color: #000000 !important; color: #FFD700 !important; border: 2px solid #000000 !important; padding: 12px; font-size: 1.1rem; transition: all 0.3s ease;">
+                        🔮 Predict Energy Usage
+                    </button>
+
+                    <!-- Info Text -->
+                    <p class="mt-3 mb-0 text-center" style="color: #616161 !important; font-size: 0.9em;">
+                        Uses AI model and historical data from sample_data.csv
+                    </p>
+                </div>
+            </div>
+
+            <!-- Recommendations Card -->
+            <div class="card prediction-card" style="border: 2px solid #000000 !important; border-radius: 10px !important; height: calc(100% - 320px);">
+                <div class="card-header" style="background-color: #000000 !important; color: #FFD700 !important; font-weight: bold !important;">
+                    💡 Recommendations
+                </div>
+                <div class="card-body" style="background-color: #FFD700 !important; overflow-y: auto;">
+                    <ul id="recommendations-list" class="list-unstyled mb-0">
+                        <li class="recommendation-item mb-3" style="color: #212121 !important;">
+                            <strong>Enter parameters and click "Predict" to get AI-powered recommendations</strong>
+                        </li>
+                        <li class="recommendation-item mb-3" style="color: #616161 !important;">
+                            <small>Based on PA3 Energy Predictor model and historical data</small>
+                        </li>
+                    </ul>
+                </div>
+            </div>
+        </div>
+
+        <!-- Right Column: KPI Cards and Hourly Breakdown -->
+        <div class="col-lg-8">
+            <!-- KPI Cards Row -->
+            <div class="row mb-4">
+                <!-- Total Daily kWh Card -->
+                <div class="col-md-4 mb-3">
+                    <div class="card prediction-card h-100" style="border: 2px solid #000000 !important; border-radius: 10px !important;">
+                        <div class="card-header text-center" style="background-color: #000000 !important; color: #FFD700 !important; font-weight: bold !important;">
+                            Predicted Daily Energy
+                        </div>
+                        <div class="card-body d-flex flex-column justify-content-center align-items-center"
+                             style="background-color: #FFD700 !important;">
+                            <h3 id="kwh-result" class="metric-value" style="color: #000000 !important; font-weight: bold !important; font-size: 2.2rem !important; margin: 10px 0 !important;">
+                                0 kWh
+                            </h3>
+                            <p class="metric-label" style="color: #616161 !important; font-size: 1rem !important; text-transform: uppercase; letter-spacing: 1px; margin: 0 !important;">
+                                Total Daily kWh
+                            </p>
+                            <p id="avg-hourly-kwh" class="mt-2 mb-0" style="color: #616161 !important; font-size: 0.9em;"></p>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Predicted Rate Card -->
+                <div class="col-md-4 mb-3">
+                    <div class="card prediction-card h-100" style="border: 2px solid #000000 !important; border-radius: 10px !important;">
+                        <div class="card-header text-center" style="background-color: #000000 !important; color: #FFD700 !important; font-weight: bold !important;">
+                            Predicted Electricity Rate
+                        </div>
+                        <div class="card-body d-flex flex-column justify-content-center align-items-center"
+                             style="background-color: #FFD700 !important;">
+                            <h3 id="rate-result" class="metric-value" style="color: #000000 !important; font-weight: bold !important; font-size: 2.2rem !important; margin: 10px 0 !important;">
+                                ₱0.00/kWh
+                            </h3>
+                            <p class="metric-label" style="color: #616161 !important; font-size: 1rem !important; text-transform: uppercase; letter-spacing: 1px; margin: 0 !important;">
+                                Per kWh
+                            </p>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Total Cost Card -->
+                <div class="col-md-4 mb-3">
+                    <div class="card prediction-card h-100" style="border: 2px solid #000000 !important; border-radius: 10px !important;">
+                        <div class="card-header text-center" style="background-color: #000000 !important; color: #FFD700 !important; font-weight: bold !important;">
+                            Predicted Daily Cost
+                        </div>
+                        <div class="card-body d-flex flex-column justify-content-center align-items-center"
+                             style="background-color: #FFD700 !important;">
+                            <h3 id="cost-result" class="metric-value" style="color: #000000 !important; font-weight: bold !important; font-size: 2.2rem !important; margin: 10px 0 !important;">
+                                ₱0.00
+                            </h3>
+                            <p class="metric-label" style="color: #616161 !important; font-size: 1rem !important; text-transform: uppercase; letter-spacing: 1px; margin: 0 !important;">
+                                Total Cost
+                            </p>
+                            <p id="avg-hourly-cost" class="mt-2 mb-0" style="color: #616161 !important; font-size: 0.9em;"></p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Hourly Breakdown Chart -->
+            <div class="card prediction-card" style="border: 2px solid #000000 !important; border-radius: 10px !important;">
+                <div class="card-header text-center" style="background-color: #000000 !important; color: #FFD700 !important; font-weight: bold !important;">
+                    📊 Predicted Hourly Energy Breakdown
+                </div>
+                <div class="card-body" style="background-color: #FFD700 !important; padding: 0 !important;">
+                    <div id="hourly-breakdown-chart" class="hourly-breakdown-chart" style="height: 300px; padding: 20px;">
+                        <canvas id="hourlyChart"></canvas>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Additional Info Row -->
+            <div class="row mt-4">
+                <div class="col-md-6">
+                    <div class="card" style="border: 2px solid #000000 !important; border-radius: 10px !important;">
+                        <div class="card-header" style="background-color: #000000 !important; color: #FFD700 !important; font-weight: bold !important; font-size: 0.9rem;">
+                            Room Type
+                        </div>
+                        <div class="card-body py-2" style="background-color: #FFD700 !important;">
+                            <p id="room-type" class="mb-0 fw-bold" style="color: #000000 !important;">
+                                Select a room to see type
+                            </p>
+                        </div>
+                    </div>
+                </div>
+                <div class="col-md-6">
+                    <div class="card" style="border: 2px solid #000000 !important; border-radius: 10px !important;">
+                        <div class="card-header" style="background-color: #000000 !important; color: #FFD700 !important; font-weight: bold !important; font-size: 0.9rem;">
+                            Model Confidence
+                        </div>
+                        <div class="card-body py-2" style="background-color: #FFD700 !important;">
+                            <div class="d-flex align-items-center">
+                                <div class="flex-grow-1">
+                                    <div class="progress" style="height: 10px; background-color: #E0E0E0;">
+                                        <div id="confidence-bar" class="progress-bar"
+                                             style="background-color: #000000; width: 0%;"></div>
+                                    </div>
+                                </div>
+                                <span id="confidence-value" class="ms-2 fw-bold" style="color: #000000 !important;">
+                                    0%
+                                </span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+    // Global variables
+    let hourlyChart = null;
+    let predictionData = null;
+
+    // Define ALL available rooms - both regular and lab rooms
+    const ALL_ROOMS = [
+        '101', '102', '103', '104', '105', '106', '107', '108', '109', '110', '111',
+        '701', '702', '703', '704', '705'
+    ];
+
+    // Initialize when DOM is loaded
+    document.addEventListener('DOMContentLoaded', function() {
+        console.log('Predictive Analytics tab initialized');
+
+        // Immediately populate the dropdown with all rooms
+        populateRoomDropdown(ALL_ROOMS);
+
+        // Also try to load rooms from API to see if there are more
+        loadAvailableRoomsFromAPI();
+
+        // Set up event listeners
+        setupPredictionListeners();
+
+        // Initialize room type display
+        updateRoomType();
+    });
+
+    // Load available rooms from API (optional - for dynamic updates)
+    function loadAvailableRoomsFromAPI() {
+        fetch('/api/predictive-rooms')
+            .then(response => response.json())
+            .then(data => {
+                if (data.rooms && data.rooms.length > 0) {
+                    console.log('Loaded rooms from API:', data.rooms);
+                    // Check if API returns more rooms than our default list
+                    const apiRooms = data.rooms;
+                    const combinedRooms = [...new Set([...ALL_ROOMS, ...apiRooms])].sort((a, b) => {
+                        return parseInt(a) - parseInt(b);
+                    });
+
+                    if (combinedRooms.length > ALL_ROOMS.length) {
+                        console.log('Found additional rooms from API, updating dropdown');
+                        populateRoomDropdown(combinedRooms);
+                    }
+                }
+            })
+            .catch(error => {
+                console.error('Error loading rooms from API (using default rooms):', error);
+            });
+    }
+
+    // Populate room dropdown immediately
+    function populateRoomDropdown(rooms) {
+        const roomDropdown = document.getElementById('predict-room-dropdown');
+        if (!roomDropdown) return;
+
+        // Clear existing options
+        roomDropdown.innerHTML = '';
+
+        // Add rooms sorted numerically
+        rooms.sort((a, b) => {
+            const aNum = parseInt(a);
+            const bNum = parseInt(b);
+            return aNum - bNum;
+        }).forEach(room => {
+            const isLab = room.startsWith('7');
+            const option = document.createElement('option');
+            option.value = room;
+            option.textContent = `Room ${room} ${isLab ? '(Lab)' : ''}`;
+            roomDropdown.appendChild(option);
+        });
+
+        // Set default value to first lab room if available, otherwise first room
+        const labRooms = rooms.filter(r => r.startsWith('7'));
+        if (labRooms.length > 0) {
+            roomDropdown.value = labRooms[0];
+        } else if (rooms.length > 0) {
+            roomDropdown.value = rooms[0];
+        }
+
+        updateRoomType();
+    }
+
+    // Set up event listeners
+    function setupPredictionListeners() {
+        const predictButton = document.getElementById('predict-button');
+        const datePicker = document.getElementById('predict-date-picker');
+        const roomDropdown = document.getElementById('predict-room-dropdown');
+
+        if (predictButton) {
+            predictButton.addEventListener('click', function() {
+                runPrediction();
+
+                // Add click animation
+                this.style.transform = 'scale(0.95)';
+                setTimeout(() => {
+                    this.style.transform = 'scale(1)';
+                }, 150);
+            });
+
+            // Hover effect
+            predictButton.addEventListener('mouseenter', function() {
+                this.style.backgroundColor = '#333333 !important';
+                this.style.boxShadow = '0 4px 8px rgba(0, 0, 0, 0.2)';
+            });
+
+            predictButton.addEventListener('mouseleave', function() {
+                this.style.backgroundColor = '#000000 !important';
+                this.style.boxShadow = 'none';
+            });
+        }
+
+        if (datePicker) {
+            datePicker.addEventListener('change', function() {
+                // Update prediction if we already have data
+                if (predictionData) {
+                    runPrediction();
+                }
+            });
+        }
+
+        if (roomDropdown) {
+            roomDropdown.addEventListener('change', function() {
+                updateRoomType();
+                // Update prediction if we already have data
+                if (predictionData) {
+                    runPrediction();
+                }
+            });
+        }
+    }
+
+    // Update room type display
+    function updateRoomType() {
+        const roomDropdown = document.getElementById('predict-room-dropdown');
+        const roomTypeElement = document.getElementById('room-type');
+
+        if (roomDropdown && roomTypeElement) {
+            const roomNumber = roomDropdown.value;
+            const isLab = roomNumber.startsWith('7');
+
+            roomTypeElement.textContent = isLab ? 'Laboratory' : 'Office/Classroom';
+            roomTypeElement.style.color = isLab ? '#F44336' : '#000000';
+        }
+    }
+
+    // Run prediction using YOUR EnergyPredictor model
+    function runPrediction() {
+        const datePicker = document.getElementById('predict-date-picker');
+        const roomDropdown = document.getElementById('predict-room-dropdown');
+        const predictButton = document.getElementById('predict-button');
+
+        if (!datePicker || !roomDropdown) return;
+
+        const selectedDate = datePicker.value;
+        const selectedRoom = roomDropdown.value;
+
+        // Show loading state
+        predictButton.innerHTML = '⏳ Predicting...';
+        predictButton.disabled = true;
+
+        // Update metrics to loading
+        document.getElementById('kwh-result').textContent = '...';
+        document.getElementById('rate-result').textContent = '...';
+        document.getElementById('cost-result').textContent = '...';
+
+        // Call YOUR EnergyPredictor API
+        fetch(`/api/predict-energy?date=${selectedDate}&room=${selectedRoom}`)
+            .then(response => {
+                if (!response.ok) {
+                    throw new Error(`API Error: ${response.status}`);
+                }
+                return response.json();
+            })
+            .then(data => {
+                // Process your actual EnergyPredictor response
+                processPredictionResponse(data, selectedRoom, selectedDate);
+
+                // Reset button
+                predictButton.innerHTML = '✅ Prediction Complete!';
+                setTimeout(() => {
+                    predictButton.innerHTML = '🔮 Predict Energy Usage';
+                    predictButton.disabled = false;
+                }, 1500);
+            })
+            .catch(error => {
+                console.error('Prediction error:', error);
+
+                // Fallback to mock data if API fails
+                useFallbackPrediction(selectedDate, selectedRoom);
+
+                // Reset button with error indication
+                predictButton.innerHTML = '⚠️ Using Fallback Data';
+                predictButton.style.backgroundColor = '#F44336 !important';
+                setTimeout(() => {
+                    predictButton.innerHTML = '🔮 Predict Energy Usage';
+                    predictButton.style.backgroundColor = '#000000 !important';
+                    predictButton.disabled = false;
+                }, 2000);
+            });
+    }
+
+    // Process YOUR EnergyPredictor response
+    function processPredictionResponse(data, room, date) {
+        // Extract data from your EnergyPredictor response structure
+        const prediction = {
+            totalKwh: data.total_daily_kWh || data.energy_kWh || 0,
+            rate: data.predicted_rate || data.energy_rate || 11.0,
+            totalCost: data.total_cost_Php || data.energy_cost_Php || 0,
+            avgHourlyKwh: data.avg_hourly_kWh || 0,
+            avgHourlyCost: data.avg_hourly_cost_Php || 0,
+            hourlyBreakdown: data.hourly_breakdown || Array(24).fill(0),
+            recommendations: data.recommendations || ['No recommendations available'],
+            roomType: data.room_type || (room.startsWith('7') ? 'Laboratory' : 'Office'),
+            confidence: data.confidence || data.model_confidence || 85
+        };
+
+        // Store prediction data
+        predictionData = prediction;
+
+        // Update UI
+        updatePredictionUI(prediction);
+    }
+
+    // Fallback prediction (in case API fails)
+    function useFallbackPrediction(date, room) {
+        // Simple fallback logic
+        const dateObj = new Date(date);
+        const isLab = room.startsWith('7');
+        const isWeekend = dateObj.getDay() === 0 || dateObj.getDay() === 6;
+
+        let baseEnergy = isLab ? 25.0 : 15.0;
+        if (isWeekend) baseEnergy *= 0.3;
+
+        const totalKwh = parseFloat(baseEnergy.toFixed(2));
+        const rate = 11.0;
+        const totalCost = parseFloat((totalKwh * rate).toFixed(2));
+
+        const fallbackData = {
+            totalKwh: totalKwh,
+            rate: rate,
+            totalCost: totalCost,
+            avgHourlyKwh: parseFloat((totalKwh / 24).toFixed(3)),
+            avgHourlyCost: parseFloat((totalCost / 24).toFixed(2)),
+            hourlyBreakdown: Array(24).fill(parseFloat((totalKwh / 24).toFixed(3))),
+            recommendations: ['Using fallback prediction model', 'Check API connection'],
+            roomType: isLab ? 'Laboratory' : 'Office',
+            confidence: 65
+        };
+
+        predictionData = fallbackData;
+        updatePredictionUI(fallbackData);
+    }
+
+    // Update UI with prediction data
+    function updatePredictionUI(data) {
+        // Update metric cards
+        document.getElementById('kwh-result').textContent = `${data.totalKwh} kWh`;
+        document.getElementById('rate-result').textContent = `₱${data.rate.toFixed(2)}/kWh`;
+        document.getElementById('cost-result').textContent = `₱${data.totalCost}`;
+
+        // Update average values
+        document.getElementById('avg-hourly-kwh').textContent = `Avg: ${data.avgHourlyKwh} kWh/hour`;
+        document.getElementById('avg-hourly-cost').textContent = `Avg: ₱${data.avgHourlyCost}/hour`;
+
+        // Update room type
+        document.getElementById('room-type').textContent = data.roomType;
+        document.getElementById('room-type').style.color = data.roomType === 'Laboratory' ? '#F44336' : '#000000';
+
+        // Update confidence
+        document.getElementById('confidence-value').textContent = `${data.confidence}%`;
+        document.getElementById('confidence-bar').style.width = `${data.confidence}%`;
+        document.getElementById('confidence-bar').style.backgroundColor =
+            data.confidence > 80 ? '#4CAF50' : data.confidence > 60 ? '#FF9800' : '#F44336';
+
+        // Update recommendations
+        updateRecommendations(data.recommendations);
+
+        // Update hourly chart
+        updateHourlyChart(data.hourlyBreakdown);
+    }
+
+    // Update recommendations list
+    function updateRecommendations(recommendations) {
+        const listElement = document.getElementById('recommendations-list');
+
+        if (!listElement) return;
+
+        let html = '';
+        recommendations.forEach((rec, index) => {
+            // Handle both string and object formats
+            const text = typeof rec === 'string' ? rec : rec.text || rec.message || 'Recommendation';
+            const priority = rec.priority || 'medium';
+
+            let icon = '';
+
+            switch(priority) {
+                case 'high':
+                    icon = '⚠️ ';
+                    break;
+                case 'medium':
+                    icon = '💡 ';
+                    break;
+                case 'low':
+                    icon = '✅ ';
+                    break;
+                default:
+                    icon = '📋 ';
+            }
+
+            html += `
+                <li class="recommendation-item mb-3" style="color: #212121 !important;">
+                    <strong>${icon}${text}</strong>
+                </li>
+            `;
+        });
+
+        listElement.innerHTML = html;
+    }
+
+    // Update hourly chart
+    function updateHourlyChart(hourlyData) {
+        const ctx = document.getElementById('hourlyChart');
+
+        // Destroy existing chart if it exists
+        if (hourlyChart) {
+            hourlyChart.destroy();
+        }
+
+        // Create hour labels
+        const hourLabels = [];
+        for (let hour = 0; hour < 24; hour++) {
+            hourLabels.push(`${hour}:00`);
+        }
+
+        // Ensure we have 24 data points
+        const chartData = hourlyData.length === 24 ? hourlyData :
+                         Array(24).fill(hourlyData.length > 0 ?
+                         hourlyData.reduce((a, b) => a + b, 0) / hourlyData.length : 0);
+
+        // Create new chart
+        hourlyChart = new Chart(ctx, {
+            type: 'bar',
+            data: {
+                labels: hourLabels,
+                datasets: [{
+                    label: 'Energy Consumption (kWh)',
+                    data: chartData,
+                    backgroundColor: 'rgba(0, 0, 0, 0.7)',
+                    borderColor: '#000000',
+                    borderWidth: 1,
+                    borderRadius: 3,
+                    hoverBackgroundColor: '#FFD700'
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                    legend: {
+                        labels: {
+                            color: '#212121',
+                            font: {
+                                size: 14,
+                                weight: 'bold'
+                            }
+                        }
+                    },
+                    tooltip: {
+                        backgroundColor: 'rgba(0, 0, 0, 0.8)',
+                        titleColor: '#FFD700',
+                        bodyColor: '#FFFFFF',
+                        borderColor: '#FFD700',
+                        borderWidth: 1,
+                        callbacks: {
+                            label: function(context) {
+                                return `Hour ${context.label}: ${context.parsed.y.toFixed(3)} kWh`;
+                            }
+                        }
+                    }
+                },
+                scales: {
+                    x: {
+                        grid: {
+                            color: 'rgba(224, 224, 224, 0.5)'
+                        },
+                        ticks: {
+                            color: '#212121',
+                            font: {
+                                size: 11
+                            },
+                            maxTicksLimit: 12
+                        },
+                        title: {
+                            display: true,
+                            text: 'Hour of Day',
+                            color: '#212121',
+                            font: {
+                                size: 14,
+                                weight: 'bold'
+                            }
+                        }
+                    },
+                    y: {
+                        beginAtZero: true,
+                        grid: {
+                            color: 'rgba(224, 224, 224, 0.5)'
+                        },
+                        ticks: {
+                            color: '#212121',
+                            font: {
+                                size: 11
+                            },
+                            callback: function(value) {
+                                return value.toFixed(2) + ' kWh';
+                            }
+                        },
+                        title: {
+                            display: true,
+                            text: 'Energy (kWh)',
+                            color: '#212121',
+                            font: {
+                                size: 14,
+                                weight: 'bold'
+                            }
+                        }
+                    }
+                },
+                interaction: {
+                    intersect: false,
+                    mode: 'index'
+                },
+                animation: {
+                    duration: 1000,
+                    easing: 'easeOutQuart'
+                }
+            }
+        });
+    }
+
+    // Clean up when leaving the tab
+    function cleanup() {
+        if (hourlyChart) {
+            hourlyChart.destroy();
+            hourlyChart = null;
+        }
+    }
+
+    // Export functions for external access if needed
+    window.predictiveTab = {
+        runPrediction: runPrediction,
+        cleanup: cleanup
+    };
+</script>

@@ -1,0 +1,145 @@
+
+    body {
+        background-color: #FFFFFF !important;
+        color: #212121 !important;
+        font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    }
+
+    .custom-tabs {
+        background-color: #000000 !important;
+        border-right: 2px solid #FFD700 !important;
+        padding: 20px 0 !important;
+    }
+
+    .custom-tab {
+        background-color: #000000 !important;
+        color: #FFFFFF !important;
+        border: none !important;
+        margin: 5px 0 !important;
+        padding: 15px 20px !important;
+        border-radius: 0 !important;
+        transition: all 0.3s ease !important;
+    }
+
+    .custom-tab:hover {
+        background-color: #333333 !important;
+        color: #FFD700 !important;
+    }
+
+    .custom-tab--selected {
+        background-color: #FFD700 !important;
+        color: #000000 !important;
+        font-weight: bold !important;
+        border-left: 4px solid #000000 !important;
+    }
+
+    .btn-mustard {
+        background-color: #FFD700 !important;
+        color: #000000 !important;
+        border: 1px solid #000000 !important;
+        font-weight: bold !important;
+        transition: all 0.3s ease !important;
+    }
+
+    .btn-mustard:hover {
+        background-color: #FFC400 !important;
+        transform: scale(1.05) !important;
+        box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2) !important;
+    }
+
+    .metric-value {
+        color: #000000 !important;
+        font-weight: bold !important;
+        font-size: 2.2rem !important;
+    }
+
+    .metric-label {
+        color: #616161 !important;
+        font-size: 1rem !important;
+        text-transform: uppercase !important;
+        letter-spacing: 1px !important;
+    }
+
+    .notification-high {
+        background-color: #FFEBEE !important;
+        border-left: 4px solid #F44336 !important;
+        color: #B71C1C !important;
+    }
+
+    .notification-medium {
+        background-color: #FFF3E0 !important;
+        border-left: 4px solid #FF9800 !important;
+        color: #E65100 !important;
+    }
+
+    .notification-low {
+        background-color: #E8F5E9 !important;
+        border-left: 4px solid #4CAF50 !important;
+        color: #1B5E20 !important;
+    }
+
+    .tabs-container {
+        background-color: #000000 !important;
+    }
+
+    /* Responsive typography */
+    @media (max-width: 768px) {
+        .metric-value {
+            font-size: 1.5rem !important;
+        }
+        .metric-label {
+            font-size: 0.8rem !important;
+        }
+        h2 {
+            font-size: 1.5rem !important;
+        }
+    }
+
+    /* Responsive cards */
+    .card {
+        margin-bottom: 1rem;
+    }
+
+    /* Mobile optimizations */
+    @media (max-width: 576px) {
+        .container-fluid {
+            padding-left: 10px !important;
+            padding-right: 10px !important;
+        }
+
+        .btn {
+            padding: 8px 12px !important;
+            font-size: 14px !important;
+        }
+
+        .card-body {
+            padding: 1rem !important;
+        }
+    }
+
+    /* Tablet optimizations */
+    @media (min-width: 577px) and (max-width: 992px) {
+        .metric-value {
+            font-size: 1.8rem !important;
+        }
+    }
+
+    /* Custom scrollbar */
+    ::-webkit-scrollbar {
+        width: 8px;
+        height: 8px;
+    }
+
+    ::-webkit-scrollbar-track {
+        background: #F5F5F5;
+    }
+
+    ::-webkit-scrollbar-thumb {
+        background: #FFD700;
+        border-radius: 4px;
+    }
+
+    ::-webkit-scrollbar-thumb:hover {
+        background: #FFC400;
+    }
+    

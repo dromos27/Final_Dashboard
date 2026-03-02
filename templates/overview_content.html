@@ -1,0 +1,452 @@
+<!-- templates/overview_content.html — v4.4 -->
+<style>
+.ov-card {
+    background: #ffffff;
+    border: 1.5px solid #e8e8e8;
+    border-radius: 12px;
+    overflow: hidden;
+    transition: box-shadow 0.2s, transform 0.2s;
+}
+.ov-card:hover { box-shadow: 0 6px 24px rgba(0,0,0,0.07); transform: translateY(-1px); }
+.ov-card-header {
+    background: #000;
+    color: #FFD700;
+    padding: 9px 16px;
+    font-size: 0.72rem;
+    font-weight: 700;
+    letter-spacing: 1.3px;
+    text-transform: uppercase;
+}
+.ov-card-body { background: #fff; padding: 18px; }
+.ov-metric-tile {
+    display: flex; flex-direction: column;
+    align-items: flex-start; justify-content: center;
+    height: 100%; padding: 20px; background: #fff;
+}
+.ov-metric-accent { display: inline-block; width: 28px; height: 3px; background: #FFD700; border-radius: 2px; margin-bottom: 10px; }
+.ov-metric-label  { font-size: 0.65rem; font-weight: 700; letter-spacing: 1.4px; text-transform: uppercase; color: #999; margin-bottom: 3px; }
+.ov-metric-value  { font-size: 1.9rem; font-weight: 800; color: #111; line-height: 1.1; letter-spacing: -0.5px; }
+.ov-metric-unit   { font-size: 0.75rem; font-weight: 500; color: #aaa; margin-top: 2px; }
+.ov-status-row {
+    display: flex; align-items: center; gap: 24px;
+    padding: 12px 18px; background: #fff;
+    border: 1.5px solid #e8e8e8; border-radius: 12px;
+}
+.ov-chip { display: flex; align-items: center; gap: 8px; }
+.ov-chip-dot { width: 8px; height: 8px; border-radius: 50%; background: #ccc; flex-shrink: 0; }
+.ov-chip-dot.ok   { background:#22c55e; box-shadow:0 0 0 3px rgba(34,197,94,.18); }
+.ov-chip-dot.err  { background:#ef4444; box-shadow:0 0 0 3px rgba(239,68,68,.18); }
+.ov-chip-dot.warn { background:#f59e0b; box-shadow:0 0 0 3px rgba(245,158,11,.18); }
+.ov-chip-dot.spin { animation: dotpulse 1.2s infinite; }
+@keyframes dotpulse { 0%,100%{opacity:1} 50%{opacity:.35} }
+.ov-chip-label { font-size: 0.65rem; font-weight: 700; letter-spacing: 1px; text-transform: uppercase; color: #aaa; }
+.ov-chip-value { font-size: 0.78rem; font-weight: 600; color: #222; }
+.ov-toolbar {
+    display: flex; align-items: center; gap: 12px;
+    padding: 10px 16px; background: #fff;
+    border: 1.5px solid #e8e8e8; border-radius: 12px;
+}
+.ov-toolbar label { font-size: 0.65rem; font-weight: 700; letter-spacing: 1px; text-transform: uppercase; color: #aaa; white-space: nowrap; margin: 0; }
+.ov-toolbar input[type="date"] {
+    flex: 1; border: 1.5px solid #e8e8e8; border-radius: 8px;
+    padding: 6px 12px; font-size: 0.83rem; color: #111; background: #fafafa; outline: none;
+}
+.ov-toolbar input[type="date"]:focus { border-color: #FFD700; }
+.ov-btn-export {
+    white-space: nowrap; background: #000; color: #FFD700;
+    border: none; border-radius: 8px; padding: 7px 16px;
+    font-size: 0.75rem; font-weight: 700; letter-spacing: 0.5px; cursor: pointer; transition: background .2s;
+}
+.ov-btn-export:hover { background: #222; }
+.ov-btn-export:disabled { background: #555; cursor: not-allowed; }
+.ov-section-title {
+    font-size: 0.65rem; font-weight: 700; letter-spacing: 2px;
+    text-transform: uppercase; color: #bbb;
+    margin-bottom: 10px; padding-bottom: 7px;
+    border-bottom: 1px solid #efefef;
+}
+.ov-log-header {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 9px 16px; background: #000; color: #FFD700;
+}
+.ov-log-header span { font-size: 0.72rem; font-weight: 700; letter-spacing: 1.2px; text-transform: uppercase; }
+.ov-btn-clear {
+    background: transparent; border: 1px solid #FFD700; color: #FFD700;
+    border-radius: 6px; padding: 2px 10px; font-size: 0.68rem; cursor: pointer; transition: background .2s;
+}
+.ov-btn-clear:hover { background: rgba(255,215,0,.15); }
+.ov-log {
+    font-family: 'Courier New', monospace; font-size: 0.75rem;
+    background: #0d0d0d; color: #00e676;
+    padding: 12px; max-height: 180px; overflow-y: auto;
+    border-radius: 0 0 10px 10px; line-height: 1.65;
+}
+.ov-log div { padding: 1px 0; border-bottom: 1px solid rgba(255,255,255,.04); }
+.ov-log div:last-child { border-bottom: none; }
+.ov-light-pill {
+    display: inline-flex; align-items: center; gap: 4px;
+    padding: 2px 9px; border-radius: 20px;
+    font-size: 0.68rem; font-weight: 700; letter-spacing: .5px; text-transform: uppercase;
+}
+.ov-light-pill.on  { background: rgba(34,197,94,.1); color: #16a34a; }
+.ov-light-pill.off { background: rgba(0,0,0,.05); color: #999; }
+
+.ov-csv-strip { font-size: 0.72rem; color: #999; margin-top: 8px; }
+.ov-csv-strip strong { color: #111; }
+</style>
+
+<h2 class="tab-page-title">Overview</h2>
+<p class="tab-page-subtitle">Room 705 · Real-time energy monitoring</p>
+<hr class="tab-page-rule">
+
+<!-- Status bar -->
+<div class="ov-status-row mb-3">
+    <div class="ov-chip">
+        <div id="dot-wifi" class="ov-chip-dot spin"></div>
+        <div><div class="ov-chip-label">WiFi</div><div id="wifi-status" class="ov-chip-value">—</div></div>
+    </div>
+    <div class="ov-chip">
+        <div id="dot-cloud" class="ov-chip-dot spin"></div>
+        <div><div class="ov-chip-label">Cloud</div><div id="cloud-status" class="ov-chip-value">—</div></div>
+    </div>
+    <div class="ov-chip">
+        <div id="dot-sdcard" class="ov-chip-dot spin"></div>
+        <div><div class="ov-chip-label">SD Card</div><div id="sdcard-status" class="ov-chip-value">—</div></div>
+    </div>
+    <div class="ms-auto" style="text-align:right;">
+        <div class="ov-chip-label">Last Updated</div>
+        <div id="last-update-time" class="ov-chip-value">—</div>
+    </div>
+</div>
+
+<!-- Toolbar -->
+<div class="ov-toolbar mb-2">
+    <label for="tab1-date-picker">Date</label>
+    <input type="date" id="tab1-date-picker" value="">
+    <button id="export-csv-btn" class="ov-btn-export">↓ Export CSV (7 days)</button>
+</div>
+
+
+<!-- Metrics + Chart -->
+<p class="ov-section-title">Live Readings</p>
+<div class="row g-3 mb-4">
+    <div class="col-xl-5 col-lg-5 col-md-12">
+        <div class="row g-3 h-100">
+            <div class="col-6">
+                <div class="ov-card h-100">
+                    <div class="ov-card-header">⚙ Voltage</div>
+                    <div class="ov-metric-tile">
+                        <div class="ov-metric-accent"></div>
+                        <div class="ov-metric-label">Live</div>
+                        <div id="voltage-value" class="ov-metric-value">0.00</div>
+                        <div class="ov-metric-unit">Volts</div>
+                    </div>
+                </div>
+            </div>
+            <div class="col-6">
+                <div class="ov-card h-100">
+                    <div class="ov-card-header">〜 Current</div>
+                    <div class="ov-metric-tile">
+                        <div class="ov-metric-accent"></div>
+                        <div class="ov-metric-label">Live</div>
+                        <div id="current-value" class="ov-metric-value">0.000</div>
+                        <div class="ov-metric-unit">Amperes</div>
+                    </div>
+                </div>
+            </div>
+            <div class="col-6">
+                <div class="ov-card h-100">
+                    <div class="ov-card-header">⚡ Energy</div>
+                    <div class="ov-metric-tile">
+                        <div class="ov-metric-accent"></div>
+                        <div class="ov-metric-label">Total</div>
+                        <div id="total-energy" class="ov-metric-value">0.000</div>
+                        <div class="ov-metric-unit">kWh consumed</div>
+                        <div class="mt-2" style="font-size:.75rem;color:#999;">
+                            Live: <strong id="live-consumption" style="color:#111;">0.000</strong> kW
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="col-6">
+                <div class="ov-card h-100">
+                    <div class="ov-card-header">₱ Est. Cost</div>
+                    <div class="ov-metric-tile">
+                        <div class="ov-metric-accent"></div>
+                        <div class="ov-metric-label">At ₱11.00 / kWh</div>
+                        <div id="total-cost" class="ov-metric-value" style="font-size:1.65rem;">₱0.00</div>
+                        <div class="ov-metric-unit">Philippine Peso</div>
+                        <div class="mt-3">
+                            <span id="light-state-pill" class="ov-light-pill off">● Light OFF</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="col-xl-7 col-lg-7 col-md-12">
+        <div class="ov-card" style="height:100%;">
+            <div id="chart-header" class="ov-card-header">📈 Power (W) — Historical Data</div>
+            <div class="ov-card-body" style="height:calc(100% - 38px); padding:16px;">
+                <div style="position:relative; height:280px;">
+                    <canvas id="energyChart"></canvas>
+                </div>
+                <div id="ov-csv-strip" class="ov-csv-strip" style="display:none;">
+                    Avg <strong id="csv-avg">—</strong> W &nbsp;·&nbsp;
+                    Peak <strong id="csv-peak">—</strong> W &nbsp;·&nbsp;
+                    Energy <strong id="csv-energy">—</strong> kWh &nbsp;·&nbsp;
+                    <span id="csv-pts" style="color:#bbb;">—</span>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Data log -->
+<p class="ov-section-title">Data Log</p>
+<div class="ov-card" style="overflow:hidden;">
+    <div class="ov-log-header">
+        <span>📋 Real-Time Log</span>
+        <button id="clear-log-btn" class="ov-btn-clear">Clear</button>
+    </div>
+    <div id="data-log-container" class="ov-log">
+        <div style="color:#555;">Logging will appear here…</div>
+    </div>
+</div>
+
+<div id="notification-toast" style="position:fixed;bottom:24px;right:24px;min-width:300px;z-index:1050;display:none;">
+    <div style="background:#000;color:#FFD700;border:1.5px solid #FFD700;border-radius:10px;padding:14px 18px;box-shadow:0 8px 32px rgba(0,0,0,.3);">
+        <span id="toast-message">Notification</span>
+    </div>
+</div>
+
+<script>
+    let energyChart          = null;
+    const currentRoom        = "705";
+    let liveUpdateInterval   = null;
+    let statusUpdateInterval = null;
+    let dataLogQueue         = [];
+    const MAX_LOG            = 50;
+    const RATE               = 11.0;
+    let activeChartDate      = '';
+
+    let liveChartInterval = null;
+
+    document.addEventListener('DOMContentLoaded', function () {
+        const today = new Date().toISOString().split('T')[0];
+        document.getElementById('tab1-date-picker').value = today;
+
+        document.getElementById('export-csv-btn').addEventListener('click', exportToCSV);
+        document.getElementById('clear-log-btn').addEventListener('click', clearDataLog);
+        document.getElementById('tab1-date-picker').addEventListener('change', function () {
+            const selected = this.value;
+            const todayStr = new Date().toISOString().split('T')[0];
+
+            // Stop auto-refresh if user picks a historical date
+            if (liveChartInterval) clearInterval(liveChartInterval);
+
+            loadCSVChart(selected);
+
+            // Resume auto-refresh only if viewing today
+            if (selected === todayStr) {
+                liveChartInterval = setInterval(function() { loadCSVChart(todayStr); }, 15000);
+            }
+        });
+
+        loadCSVChart(today);
+        fetchEnergyData();
+        startLiveUpdates();
+        startStatusUpdates();
+
+        // Auto-refresh chart every 15s while on today's date
+        liveChartInterval = setInterval(function() {
+            const todayStr = new Date().toISOString().split('T')[0];
+            const picked   = document.getElementById('tab1-date-picker').value;
+            if (picked === todayStr) loadCSVChart(todayStr);
+        }, 15000);
+    });
+
+    // ══════════════════════════════════════════════════════════
+    // CHART — auto-routes to DB (today) or CSV cache (historical)
+    // ══════════════════════════════════════════════════════════
+    function loadCSVChart(dateStr) {
+        const today   = new Date().toISOString().split('T')[0];
+        const isToday = (dateStr === today || dateStr === '');
+        const url     = isToday
+            ? `/api/energy/live-chart?date=${today}`
+            : `/api/energy/csv-chart?date=${dateStr}`;
+
+        logData(`🔄 Loading chart for ${isToday ? 'today (live DB)' : dateStr + ' (CSV)'}…`);
+
+        fetch(url)
+            .then(function(r) { return r.json(); })
+            .then(function(data) {
+                if (data.success) {
+                    activeChartDate = data.date;
+
+                    // Update picker to match actual loaded date
+                    // (may differ from today if today has no CSV data yet)
+                    if (data.date && parseInt(data.date.substring(0,4)) <= 2099) {
+                        document.getElementById('tab1-date-picker').value = data.date;
+                    }
+
+                    updateChart(data.labels, data.power_data);
+
+                    const src = data.source === 'db' ? '🟢 Live DB' : '📁 CSV Cache';
+                    document.getElementById('chart-header').textContent =
+                        `📈 Power (W) — ${data.date}  ${src}`;
+
+                    const s = data.summary;
+                    document.getElementById('csv-avg').textContent    = s.avg_power;
+                    document.getElementById('csv-peak').textContent   = s.max_power;
+                    document.getElementById('csv-energy').textContent = s.total_energy;
+                    document.getElementById('csv-pts').textContent    = s.data_points + ' readings';
+                    document.getElementById('ov-csv-strip').style.display = 'block';
+
+                    logData(`✓ Chart: ${data.labels.length} buckets · ${src} · avg ${s.avg_power} W`);
+
+                } else {
+                    // Today had no DB data yet — fall back to CSV most recent date
+                    if (isToday) {
+                        logData('ℹ No live data yet today — loading latest CSV date…');
+                        loadCSVChart('');   // CSV route returns latest available date
+                    } else {
+                        logData('✗ No data: ' + (data.error || 'unknown'));
+                    }
+                }
+            })
+            .catch(function(err) {
+                logData('❌ Fetch error: ' + err.message);
+            });
+    }
+
+    // ══════════════════════════════════════════════════════════
+    // CHART — identical to original v4.1 updateChart()
+    // ══════════════════════════════════════════════════════════
+    function updateChart(labels, powerData) {
+        const ctx = document.getElementById('energyChart');
+        if (energyChart) energyChart.destroy();
+        energyChart = new Chart(ctx, {
+            type: 'line',
+            data: { labels: labels||[], datasets:[{
+                label:'Power (W)', data: powerData||[],
+                borderColor:'#000', backgroundColor:'rgba(255,215,0,.08)',
+                fill:true, tension:.4, pointRadius:4,
+                pointBackgroundColor:'#FFD700', pointBorderColor:'#000',
+                pointBorderWidth:1.5, borderWidth:2
+            }]},
+            options: {
+                responsive:true, maintainAspectRatio:false,
+                plugins: {
+                    legend:{ labels:{ color:'#777', font:{size:11} } },
+                    tooltip:{ backgroundColor:'rgba(0,0,0,.85)', titleColor:'#FFD700', bodyColor:'#fff',
+                              borderColor:'#FFD700', borderWidth:1,
+                              callbacks:{ label: c => c.parsed.y.toFixed(2)+' W' } }
+                },
+                scales: {
+                    x:{ grid:{color:'rgba(0,0,0,.04)'}, ticks:{color:'#999',font:{size:10},maxTicksLimit:10},
+                        title:{display:true,text:'Time',color:'#999',font:{size:11}} },
+                    y:{ grid:{color:'rgba(0,0,0,.04)'}, ticks:{color:'#999',font:{size:10},callback:v=>v+' W'},
+                        title:{display:true,text:'Power (W)',color:'#999',font:{size:11}} }
+                },
+                interaction:{ intersect:false, mode:'index' }, animation:{ duration:800 }
+            }
+        });
+    }
+
+    // ══════════════════════════════════════════════════════════
+    // LIVE ESP32 — identical to original v4.1
+    // ══════════════════════════════════════════════════════════
+    function fetchEnergyData() {
+        fetch(`/api/energy/latest?room=${currentRoom}`)
+            .then(r => r.json())
+            .then(data => {
+                if (data.success) {
+                    updateMetrics(data);
+                    logData(`📡 ${new Date().toLocaleTimeString()} | V: ${data.voltage.toFixed(2)} V | I: ${data.current.toFixed(3)} A | P: ${data.power.toFixed(2)} W | E: ${data.energy_kwh.toFixed(6)} kWh | Light: ${data.light_state}`);
+                }
+                else { logData(`✗ ${data.error}`); updateMetrics({ energy_kwh:0,voltage:0,current:0,power:0,light_state:'OFF' }); }
+            })
+            .catch(e => logData(`✗ ${e.message}`));
+    }
+
+    function updateMetrics(d) {
+        const kwh = d.energy_kwh||0, v = d.voltage||0, a = d.current||0, w = d.power||0, light = d.light_state||'OFF';
+        document.getElementById('voltage-value').textContent    = v.toFixed(2);
+        document.getElementById('current-value').textContent    = a.toFixed(3);
+        document.getElementById('total-energy').textContent     = kwh.toFixed(3);
+        document.getElementById('live-consumption').textContent = (w/1000).toFixed(3);
+        document.getElementById('total-cost').textContent       = '₱'+(kwh*RATE).toFixed(2);
+        const pill = document.getElementById('light-state-pill');
+        pill.textContent = light==='ON' ? '● Light ON' : '● Light OFF';
+        pill.className   = light==='ON' ? 'ov-light-pill on' : 'ov-light-pill off';
+    }
+
+    function updateESP32Status() {
+        fetch('/api/esp32/status').then(r=>r.json()).then(data=>{
+            setChip('wifi',  'dot-wifi',  data.wifi);
+            setChip('cloud', 'dot-cloud', data.cloud);
+            setChip('sdcard','dot-sdcard',data.sd_card);
+            document.getElementById('last-update-time').textContent = data.last_update||'—';
+            logData(`✓ Status: WiFi=${data.wifi} Cloud=${data.cloud} SD=${data.sd_card}`);
+        }).catch(()=>['wifi','cloud','sdcard'].forEach(id=>{
+            document.getElementById(`${id}-status`).textContent='Error';
+            setDot(`dot-${id}`,'err');
+        }));
+    }
+
+    function setChip(id, dotId, status) {
+        const el=document.getElementById(`${id}-status`);
+        if(status==='Connected'||status==='OK'){ el.textContent=status; el.style.color='#16a34a'; setDot(dotId,'ok'); }
+        else if(status==='Disconnected'||status==='Failed'){ el.textContent=status; el.style.color='#ef4444'; setDot(dotId,'err'); }
+        else { el.textContent=status||'—'; el.style.color='#f59e0b'; setDot(dotId,'warn'); }
+    }
+    function setDot(dotId, state) { document.getElementById(dotId).className='ov-chip-dot '+state; }
+
+    function startLiveUpdates() {
+        if(liveUpdateInterval) clearInterval(liveUpdateInterval);
+        fetchEnergyData();
+        liveUpdateInterval = setInterval(fetchEnergyData, 3000);
+    }
+    function startStatusUpdates() {
+        if(statusUpdateInterval) clearInterval(statusUpdateInterval);
+        updateESP32Status();
+        statusUpdateInterval = setInterval(updateESP32Status, 5000);
+    }
+
+    function logData(msg) {
+        dataLogQueue.push(`[${new Date().toLocaleTimeString()}] ${msg}`);
+        if(dataLogQueue.length>MAX_LOG) dataLogQueue.shift();
+        const c=document.getElementById('data-log-container');
+        c.innerHTML=dataLogQueue.map(e=>`<div>${e}</div>`).join('');
+        c.scrollTop=c.scrollHeight;
+    }
+    function clearDataLog() {
+        dataLogQueue=[];
+        document.getElementById('data-log-container').innerHTML='<div style="color:#555;">Log cleared.</div>';
+    }
+    function exportToCSV() {
+        const btn=document.getElementById('export-csv-btn');
+        btn.disabled=true; btn.textContent='⏳ Exporting…';
+        fetch(`/api/energy/export?room=${currentRoom}&days=7`).then(r=>r.json()).then(data=>{
+            if(data.success){ logData(`✓ CSV: ${data.filename}`); showToast(`✅ Exported: ${data.filename}`); }
+            else { logData(`✗ ${data.error}`); showToast(`❌ ${data.error}`); }
+        }).catch(e=>showToast(`❌ ${e.message}`))
+        .finally(()=>{ btn.disabled=false; btn.textContent='↓ Export CSV (7 days)'; });
+    }
+    function showToast(msg) {
+        const t=document.getElementById('notification-toast');
+        document.getElementById('toast-message').textContent=msg;
+        t.style.display='block'; setTimeout(()=>t.style.display='none',4000);
+    }
+    function cleanup() {
+        if(energyChart){ energyChart.destroy(); energyChart=null; }
+        if(liveUpdateInterval)  clearInterval(liveUpdateInterval);
+        if(statusUpdateInterval) clearInterval(statusUpdateInterval);
+        if(liveChartInterval)   clearInterval(liveChartInterval);
+    }
+
+    logData('🚀 Overview loaded — Room 705');
+    window.overviewTab = { refresh:fetchEnergyData, exportCSV:exportToCSV, clearLog:clearDataLog, cleanup };
+</script>

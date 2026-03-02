@@ -1,0 +1,14 @@
+﻿notification_type,trigger_condition,message,priority,is_active
+consumption,>15,⚠️ High energy consumption alert! Room {room} consumed {value}kWh on {date}. This is significantly above average.,high,1
+consumption,>10,ℹ️ Room {room} consumed {value}kWh on {date}. Consider optimizing usage during peak hours.,medium,1
+consumption,>5,ℹ️ Room {room} consumed {value}kWh on {date}. Usage is within normal range.,low,1
+cost,>200,⚠️ Critical cost alert! Room {room} energy cost reached ₱{value} on {date}. Immediate action recommended.,high,1
+cost,>150,⚠️ High cost alert! Room {room} energy cost reached ₱{value} on {date}. Review usage patterns.,high,1
+cost,>100,ℹ️ Room {room} energy cost was ₱{value} on {date}. Consider energy-saving measures.,medium,1
+trend,increase_weekly,📈 Increasing trend detected in Room {room}. Weekly consumption increased by {value}% compared to last week.,medium,1
+trend,decrease_weekly,📉 Decreasing trend detected in Room {room}. Weekly consumption decreased by {value}%. Good job!,low,1
+maintenance,quarterly,🔧 Scheduled maintenance reminder for Room {room}. Quarterly maintenance is due this week.,medium,1
+schedule,conflict,⏰ Schedule conflict detected in Room {room} on {date}. Multiple bookings between {time}.,high,1
+equipment,old,🔄 Equipment upgrade suggestion for Room {room}. Some devices are over 5 years old.,medium,1
+weather,hot,🌡️ Hot weather alert! Consider adjusting AC settings in Room {room} for better efficiency.,low,1
+weather,cold,❄️ Cold weather alert! Heating system in Room {room} may need optimization.,low,1

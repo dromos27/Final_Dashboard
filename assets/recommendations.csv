@@ -1,0 +1,7 @@
+﻿threshold_type,threshold_value,recommendation
+energy_kWh,5,Consider turning off unused appliances in this room
+energy_kWh,10,Optimize air conditioning schedules for better efficiency
+energy_kWh,15,This room is consuming too much energy - consider an energy audit
+energy_cost_Php,50,Monitor this room's usage during peak hours
+energy_cost_Php,100,Consider implementing energy-saving measures in this room
+energy_cost_Php,150,This room's energy cost is very high - investigate potential issues

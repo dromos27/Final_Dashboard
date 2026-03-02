@@ -1,0 +1,275 @@
+<!-- templates/dashboard.html -->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Energy Dashboard</title>
+
+    <link rel="stylesheet" href="{{ url_for('static', filename='D1_bootstrap.min.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='D2_dashboard.css') }}">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+    <style>
+        /* ============================================================
+           BASE LAYOUT
+        ============================================================ */
+        *, *::before, *::after { box-sizing: border-box; }
+        html, body { height: 100%; margin: 0; overflow: hidden; }
+
+        .dashboard-layout { display: flex; height: 100vh; overflow: hidden; }
+
+        /* Sidebar — never scrolls, always fixed on the left */
+        .sidebar-col {
+            width: 220px;
+            min-width: 220px;
+            flex-shrink: 0;
+            height: 100vh;
+            overflow-y: auto;
+            overflow-x: hidden;
+            background-color: #1B1B1C;
+            z-index: 100;
+        }
+        .sidebar-inner {
+            display: flex;
+            flex-direction: column;
+            min-height: 100vh;
+            padding: 1.5rem 1rem;
+        }
+
+        /* Content column — fills remaining width, scrolls independently */
+        .content-col {
+            flex: 1;
+            min-width: 0;
+            height: 100vh;
+            overflow-y: auto;
+            overflow-x: hidden;
+        }
+
+        /* Content area — the background canvas */
+        .content-area {
+            min-height: 100%;
+            width: 100%;
+            padding: 1.75rem 2rem;
+            background-color: #f4f4f6;
+            transition: background-color 0.35s ease, color 0.35s ease;
+        }
+
+        .tab-content, .tab-pane { width: 100%; }
+
+        /* Remove Bootstrap container padding that squeezes content */
+        .tab-pane .container-fluid {
+            padding-left: 0 !important;
+            padding-right: 0 !important;
+        }
+
+        /* ============================================================
+           NAV PILLS
+        ============================================================ */
+        .nav-pills .nav-link {
+            color: #888; font-size: 0.85rem; border-radius: 8px;
+            padding: 9px 13px; transition: background 0.2s, color 0.2s; white-space: nowrap;
+        }
+        .nav-pills .nav-link:hover { background-color: rgba(255,215,0,0.12); color: #FFD700; }
+        .nav-pills .nav-link.active { background-color: #FFD700; color: #000; font-weight: 700; }
+
+        /* ============================================================
+           SHARED TAB HEADER — used by every tab template
+        ============================================================ */
+        .tab-page-title {
+            font-size: 1.65rem; font-weight: 800; letter-spacing: -0.5px;
+            color: #111; margin: 0 0 4px 0; line-height: 1.2;
+        }
+        .tab-page-subtitle {
+            font-size: 0.8rem; color: #aaa; font-weight: 400; margin: 0 0 12px 0;
+        }
+        .tab-page-rule {
+            border: none; border-top: 2.5px solid #FFD700;
+            margin: 0 0 22px 0; opacity: 1;
+        }
+
+        /* ============================================================
+           NIGHT MODE — only .content-area and everything inside it
+        ============================================================ */
+        .content-area.night-mode {
+            background-color: #0f0f0f !important;
+            color: #e0e0e0;
+        }
+
+        /* Page titles */
+        .content-area.night-mode .tab-page-title  { color: #f0f0f0 !important; }
+        .content-area.night-mode .tab-page-subtitle{ color: #555 !important; }
+
+        /* Overview design-system */
+        .content-area.night-mode .ov-card,
+        .content-area.night-mode .ov-card-body,
+        .content-area.night-mode .ov-metric-tile  { background: #1a1a1a !important; border-color: #2e2e2e !important; }
+        .content-area.night-mode .ov-status-row,
+        .content-area.night-mode .ov-toolbar       { background: #1a1a1a !important; border-color: #2e2e2e !important; }
+        .content-area.night-mode .ov-metric-value  { color: #f0f0f0 !important; }
+        .content-area.night-mode .ov-metric-label,
+        .content-area.night-mode .ov-metric-unit,
+        .content-area.night-mode .ov-chip-label    { color: #555 !important; }
+        .content-area.night-mode .ov-chip-value    { color: #ccc !important; }
+        .content-area.night-mode .ov-section-title { color: #444 !important; border-bottom-color: #252525 !important; }
+        .content-area.night-mode .ov-toolbar label { color: #555 !important; }
+        .content-area.night-mode .ov-toolbar input[type="date"] {
+            background: #222 !important; border-color: #333 !important; color: #eee !important;
+        }
+        .content-area.night-mode .ov-log-header    { background: #000 !important; }
+
+        /* Bootstrap cards */
+        .content-area.night-mode .card            { background-color: #1a1a1a !important; border-color: #2e2e2e !important; }
+        .content-area.night-mode .card-header     { background-color: #000 !important; color: #FFD700 !important; }
+        .content-area.night-mode .card-body       { background-color: #1a1a1a !important; color: #ddd !important; }
+
+        /* Wipe any inline yellow/light backgrounds */
+        .content-area.night-mode [style*="background-color: #FFD700"],
+        .content-area.night-mode [style*="background-color:#FFD700"],
+        .content-area.night-mode [style*="background-color: #F5F5F5"],
+        .content-area.night-mode [style*="background-color:#F5F5F5"],
+        .content-area.night-mode [style*="background-color: #f8f9fa"],
+        .content-area.night-mode [style*="background-color: #fafafa"],
+        .content-area.night-mode [style*="background-color: #FFFFFF"],
+        .content-area.night-mode [style*="background-color:#FFFFFF"],
+        .content-area.night-mode [style*="background-color: white"],
+        .content-area.night-mode .bg-light { background-color: #1a1a1a !important; }
+
+        /* Text */
+        .content-area.night-mode h1,.content-area.night-mode h2,
+        .content-area.night-mode h3,.content-area.night-mode h4,
+        .content-area.night-mode h5,.content-area.night-mode h6,
+        .content-area.night-mode p,.content-area.night-mode label,
+        .content-area.night-mode .fw-bold,.content-area.night-mode .text-dark { color: #e0e0e0 !important; }
+        .content-area.night-mode small,
+        .content-area.night-mode .text-muted { color: #666 !important; }
+        /* Keep yellow text yellow */
+        .content-area.night-mode .card-header,
+        .content-area.night-mode .card-header * { color: #FFD700 !important; }
+
+        /* Inputs */
+        .content-area.night-mode input,
+        .content-area.night-mode select,
+        .content-area.night-mode .form-control,
+        .content-area.night-mode .form-select {
+            background-color: #222 !important; color: #eee !important; border-color: #333 !important;
+        }
+
+        /* Schedule timeline */
+        .content-area.night-mode #schedule-timeline { background-color: #1a1a1a !important; }
+        .content-area.night-mode .timeline-item .event-block {
+            background-color: #2c3e50 !important; border-color: #FFD700 !important;
+        }
+
+        /* Camera detection log */
+        .content-area.night-mode #detection-log    { background: #1a1a1a !important; }
+
+        /* Misc */
+        .content-area.night-mode .btn-close        { filter: invert(1); }
+        .content-area.night-mode .prediction-card  { background: #1a1a1a !important; }
+
+        /* Night mode button */
+        #nightModeToggle {
+            background-color: #FFD700; color: #000; border: 2px solid #FFD700;
+            font-weight: 600; border-radius: 8px; width: 100%; padding: 8px;
+            cursor: pointer; transition: background 0.2s; font-size: 0.85rem;
+        }
+        #nightModeToggle:hover { background-color: #e6c200; }
+    </style>
+</head>
+<body>
+<div class="dashboard-layout">
+
+    <!-- ╔══════════════════════════╗
+         ║      SIDEBAR (fixed)     ║
+         ╚══════════════════════════╝ -->
+    <div class="sidebar-col">
+        <div class="sidebar-inner">
+            <h5 class="mb-4 fw-bold" style="color:#FFD700;letter-spacing:1px;font-size:0.95rem;">⚡ Lumergy</h5>
+
+            <div class="nav flex-column nav-pills mb-3" id="v-pills-tab" role="tablist" aria-orientation="vertical">
+                <button class="nav-link text-start mb-1 active" id="v-pills-overview-tab"
+                        data-bs-toggle="pill" data-bs-target="#v-pills-overview"
+                        type="button" role="tab" aria-selected="true">📊 Overview</button>
+                <button class="nav-link text-start mb-1" id="v-pills-predictive-tab"
+                        data-bs-toggle="pill" data-bs-target="#v-pills-predictive"
+                        type="button" role="tab" aria-selected="false">🔮 Predictive</button>
+                <button class="nav-link text-start mb-1" id="v-pills-camera-tab"
+                        data-bs-toggle="pill" data-bs-target="#v-pills-camera"
+                        type="button" role="tab" aria-selected="false">📸 Camera</button>
+                <button class="nav-link text-start mb-1" id="v-pills-schedule-tab"
+                        data-bs-toggle="pill" data-bs-target="#v-pills-schedule"
+                        type="button" role="tab" aria-selected="false">📅 Schedule</button>
+            </div>
+
+            <div class="flex-grow-1"></div>
+
+            <div class="mb-3 px-2 py-2 rounded"
+                 style="background:rgba(255,215,0,0.08);border:1px solid rgba(255,215,0,0.2);">
+                <small style="color:#555;display:block;font-size:0.62rem;letter-spacing:1px;text-transform:uppercase;">Active Room</small>
+                <span style="color:#FFD700;font-weight:700;font-size:0.9rem;">Room 705</span>
+            </div>
+
+            <button id="nightModeToggle">🌙 Night Mode</button>
+        </div>
+    </div>
+
+    <!-- ╔══════════════════════════════════╗
+         ║   CONTENT (scrolls freely)       ║
+         ╚══════════════════════════════════╝ -->
+    <div class="content-col">
+        <div class="content-area">
+            <div class="tab-content" id="v-pills-tabContent">
+
+                <div class="tab-pane fade show active" id="v-pills-overview"
+                     role="tabpanel" aria-labelledby="v-pills-overview-tab">
+                    {% include 'overview_content.html' %}
+                </div>
+
+                <div class="tab-pane fade" id="v-pills-predictive"
+                     role="tabpanel" aria-labelledby="v-pills-predictive-tab">
+                    {% include 'predictive_content.html' %}
+                </div>
+
+                <div class="tab-pane fade" id="v-pills-camera"
+                     role="tabpanel" aria-labelledby="v-pills-camera-tab">
+                    {% include 'camera_content.html' %}
+                </div>
+
+                <div class="tab-pane fade" id="v-pills-schedule"
+                     role="tabpanel" aria-labelledby="v-pills-schedule-tab">
+                    {% include 'schedule_content.html' %}
+                </div>
+
+            </div>
+        </div>
+    </div>
+
+</div>
+
+<script src="{{ url_for('static', filename='D3_bootstrap.bundle.min.js') }}"></script>
+<script>
+    document.addEventListener('DOMContentLoaded', function () {
+        const toggle      = document.getElementById('nightModeToggle');
+        const contentArea = document.querySelector('.content-area');
+
+        if (localStorage.getItem('nightMode') === 'enabled') {
+            contentArea.classList.add('night-mode');
+            toggle.textContent = '☀️ Day Mode';
+        }
+
+        toggle.addEventListener('click', function () {
+            contentArea.classList.toggle('night-mode');
+            const isNight = contentArea.classList.contains('night-mode');
+            localStorage.setItem('nightMode', isNight ? 'enabled' : 'disabled');
+            toggle.textContent = isNight ? '☀️ Day Mode' : '🌙 Night Mode';
+        });
+
+        const datePicker = document.getElementById('tab1-date-picker');
+        if (datePicker && !datePicker.value) {
+            datePicker.value = new Date().toISOString().split('T')[0];
+        }
+    });
+</script>
+</body>
+</html>

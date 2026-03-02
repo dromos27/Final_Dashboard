@@ -1,0 +1,243 @@
+<!-- templates/camera_content.html -->
+<div class="container-fluid py-3">
+
+    <!-- Shared page header -->
+    <h2 class="tab-page-title">Camera Feed</h2>
+    <p class="tab-page-subtitle">ESP32-CAM · YOLOv8 person detection</p>
+    <hr class="tab-page-rule">
+
+    <!-- Camera Status Bar -->
+    <div class="row mb-4">
+        <div class="col-12">
+            <div class="card" style="border: 2px solid #000000 !important; border-radius: 10px !important;">
+                <div class="card-header"
+                     style="background-color: #000000 !important; color: #FFD700 !important; font-weight: bold !important;">
+                    📡 Camera Status
+                </div>
+                <div class="card-body py-3" style="background-color: #FFD700 !important;">
+                    <div class="row align-items-center">
+                        <div class="col-md-5">
+                            <span class="fw-bold" id="cam-status-text" style="color: #212121;">
+                                ⏳ Connecting to ESP32-CAM...
+                            </span>
+                        </div>
+                        <div class="col-md-4">
+                            <small style="color: #616161;">
+                                Stream: <span id="cam-stream-url" class="fw-bold">—</span>
+                            </small>
+                        </div>
+                        <div class="col-md-3 text-end">
+                            <div id="occupancy-badge" class="badge px-3 py-2 fw-bold"
+                                 style="background-color: #000000; color: #FFD700; font-size: 1rem;">
+                                ⏳ Checking...
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Main Content -->
+    <div class="row">
+
+        <!-- Camera Feed -->
+        <div class="col-lg-8 mb-4">
+            <div class="card"
+                 style="border: 2px solid #000000 !important; border-radius: 10px !important; overflow: hidden;">
+                <div class="card-header d-flex justify-content-between align-items-center"
+                     style="background-color: #000000 !important; color: #FFD700 !important; font-weight: bold !important;">
+                    <span>🎥 Live ESP32-CAM Feed — YOLOv8 Person Detection</span>
+                    <button id="fullscreen-btn" class="btn btn-sm"
+                            style="background-color: #FFD700; color: #000; border: 1px solid #000;">
+                        ⛶ Fullscreen
+                    </button>
+                </div>
+                <div class="card-body p-0" style="background-color: #000;">
+                    <div id="camera-feed-container" class="position-relative">
+                        <img id="esp32-feed"
+                             src="/video_feed"
+                             class="img-fluid w-100"
+                             style="display: block; min-height: 480px; object-fit: contain; background: #000;"
+                             alt="ESP32-CAM Feed">
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Info Panel -->
+        <div class="col-lg-4">
+
+            <!-- Detection Stats -->
+            <div class="card mb-4"
+                 style="border: 2px solid #000000 !important; border-radius: 10px !important;">
+                <div class="card-header"
+                     style="background-color: #000000 !important; color: #FFD700 !important; font-weight: bold !important;">
+                    📊 Detection Statistics
+                </div>
+                <div class="card-body" style="background-color: #FFD700 !important;">
+                    <div class="row text-center mb-3">
+                        <div class="col-6">
+                            <h2 id="person-count" class="fw-bold mb-0" style="color: #000;">0</h2>
+                            <small style="color: #616161;">Persons Detected</small>
+                        </div>
+                        <div class="col-6">
+                            <h2 id="avg-confidence" class="fw-bold mb-0" style="color: #000;">0%</h2>
+                            <small style="color: #616161;">Avg Confidence</small>
+                        </div>
+                    </div>
+                    <div class="d-grid gap-2">
+                        <button id="detection-toggle-btn" class="btn fw-bold"
+                                style="background-color: #000; color: #FFD700; border: 2px solid #000;">
+                            👁️ Detection: ON
+                        </button>
+                        <button id="esp32-test-btn" class="btn fw-bold"
+                                style="background-color: #2196F3; color: white; border: 2px solid #000;">
+                            📡 Test ESP32 Connection
+                        </button>
+                    </div>
+                    <div class="mt-3 pt-3" style="border-top: 1px solid #000;">
+                        <small class="d-block" style="color: #212121;"><strong>Detection Model:</strong> YOLOv8n (Server-side)</small>
+                        <small class="d-block mt-1" style="color: #212121;"><strong>Camera:</strong> ESP32-CAM</small>
+                        <small class="d-block mt-1" id="last-update-label" style="color: #212121;"><strong>Last Update:</strong> —</small>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Detection Log -->
+            <div class="card" style="border: 2px solid #000000 !important; border-radius: 10px !important; height: 320px;">
+                <div class="card-header d-flex justify-content-between align-items-center"
+                     style="background-color: #000000 !important; color: #FFD700 !important; font-weight: bold !important;">
+                    <span>📝 Detection Log</span>
+                    <button id="clear-log-btn" class="btn btn-sm"
+                            style="background-color: #FFD700; color: #000; border: 1px solid #000;">Clear</button>
+                </div>
+                <div class="card-body p-0" style="background-color: #FFD700 !important;">
+                    <div id="detection-log" style="overflow-y: auto; height: 260px; padding: 10px;">
+                        <div class="text-center py-4" style="color: #616161;">Waiting for detections...</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Footer Info -->
+    <div class="row mt-4">
+        <div class="col-12">
+            <div class="card" style="border: 2px solid #000; border-radius: 10px;">
+                <div class="card-header" style="background-color: #000 !important; color: #FFD700 !important; font-weight: bold;">
+                    ℹ️ System Information
+                </div>
+                <div class="card-body py-2" style="background-color: #FFD700;">
+                    <div class="row">
+                        <div class="col-md-3"><small class="fw-bold" style="color:#212121;">Camera Source:</small><span class="ms-2" style="color:#616161;">ESP32-CAM (MJPEG)</span></div>
+                        <div class="col-md-3"><small class="fw-bold" style="color:#212121;">Detection:</small><span class="ms-2" style="color:#616161;">YOLOv8n — Python/Server</span></div>
+                        <div class="col-md-3"><small class="fw-bold" style="color:#212121;">Stream Route:</small><span class="ms-2" style="color:#616161;">/video_feed</span></div>
+                        <div class="col-md-3"><small class="fw-bold" style="color:#212121;">Stats Route:</small><span class="ms-2" style="color:#616161;">/api/camera/stats</span></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+    let detectionLog = [];
+    let statsInterval = null;
+    let lastPersonCount = -1;
+
+    document.addEventListener('DOMContentLoaded', function () {
+        startStatsPolling();
+        setupListeners();
+        updateLastUpdateTime();
+    });
+
+    function startStatsPolling() {
+        if (statsInterval) clearInterval(statsInterval);
+        statsInterval = setInterval(fetchStats, 1000);
+        fetchStats();
+    }
+
+    function fetchStats() {
+        fetch('/api/camera/stats')
+            .then(r => r.json())
+            .then(data => updateUI(data))
+            .catch(() => { document.getElementById('cam-status-text').textContent = '❌ Cannot reach server'; });
+    }
+
+    function updateUI(data) {
+        const statusEl = document.getElementById('cam-status-text');
+        if (data.camera_connected) { statusEl.textContent = '✅ ESP32-CAM Connected'; statusEl.style.color = '#2E7D32'; }
+        else { statusEl.textContent = '⚠️ Connecting to ESP32-CAM...'; statusEl.style.color = '#E65100'; }
+
+        document.getElementById('cam-stream-url').textContent = data.stream_url || '—';
+        document.getElementById('person-count').textContent   = data.person_count ?? 0;
+        document.getElementById('avg-confidence').textContent = (data.avg_confidence ?? 0) + '%';
+
+        const badge = document.getElementById('occupancy-badge');
+        if (data.occupied) { badge.textContent='🚨 OCCUPIED'; badge.style.backgroundColor='#F44336'; badge.style.color='white'; }
+        else                { badge.textContent='✅ VACANT';   badge.style.backgroundColor='#4CAF50'; badge.style.color='white'; }
+
+        if (data.person_count > 0 && data.person_count !== lastPersonCount) addDetectionLog(data.person_count, data.avg_confidence);
+        lastPersonCount = data.person_count;
+        updateLastUpdateTime();
+    }
+
+    function addDetectionLog(count, confidence) {
+        detectionLog.unshift({ time: new Date().toLocaleTimeString(), count, confidence });
+        if (detectionLog.length > 15) detectionLog = detectionLog.slice(0, 15);
+        renderLog();
+    }
+
+    function renderLog() {
+        const container = document.getElementById('detection-log');
+        if (!detectionLog.length) { container.innerHTML='<div class="text-center py-4" style="color:#616161">No detections yet</div>'; return; }
+        container.innerHTML = detectionLog.map(e => `
+            <div class="mb-2 p-2 rounded" style="background:rgba(0,0,0,.08);border-left:3px solid #FFD700;">
+                <div class="d-flex justify-content-between">
+                    <span class="fw-bold" style="color:#212121;">${e.time}</span>
+                    <span class="badge bg-danger">${e.count} person(s)</span>
+                </div>
+                <small style="color:#616161;">Confidence: ${e.confidence}%</small>
+            </div>`).join('');
+    }
+
+    function updateLastUpdateTime() {
+        const el = document.getElementById('last-update-label');
+        if (el) el.innerHTML = `<strong>Last Update:</strong> ${new Date().toLocaleTimeString()}`;
+    }
+
+    function setupListeners() {
+        document.getElementById('clear-log-btn').addEventListener('click', () => { detectionLog=[]; lastPersonCount=-1; renderLog(); });
+
+        document.getElementById('fullscreen-btn').addEventListener('click', () => {
+            const c = document.getElementById('camera-feed-container');
+            !document.fullscreenElement ? c.requestFullscreen && c.requestFullscreen() : document.exitFullscreen && document.exitFullscreen();
+        });
+
+        let detectionEnabled = true;
+        document.getElementById('detection-toggle-btn').addEventListener('click', () => {
+            detectionEnabled = !detectionEnabled;
+            const btn = document.getElementById('detection-toggle-btn');
+            fetch(`/api/camera/detection?enabled=${detectionEnabled}`).catch(()=>{});
+            btn.textContent = detectionEnabled ? '👁️ Detection: ON' : '🚫 Detection: OFF';
+            btn.style.backgroundColor = detectionEnabled ? '#000' : '#616161';
+            btn.style.color = detectionEnabled ? '#FFD700' : 'white';
+        });
+
+        document.getElementById('esp32-test-btn').addEventListener('click', () => {
+            const btn = document.getElementById('esp32-test-btn');
+            btn.textContent='⏳ Testing...'; btn.disabled=true;
+            fetch('/api/camera/stats').then(r=>r.json())
+                .then(data=>{ btn.textContent=data.camera_connected?'✅ Connected!':'⚠️ Camera Offline'; btn.style.backgroundColor=data.camera_connected?'#4CAF50':'#FF9800'; })
+                .catch(()=>{ btn.textContent='❌ Server Error'; btn.style.backgroundColor='#F44336'; })
+                .finally(()=>setTimeout(()=>{ btn.textContent='📡 Test ESP32 Connection'; btn.style.backgroundColor='#2196F3'; btn.disabled=false; },3000));
+        });
+    }
+
+    document.getElementById('esp32-feed').onerror = function () {
+        setTimeout(() => { this.src = '/video_feed?' + Date.now(); }, 3000);
+    };
+
+    window.cameraTab = { cleanup: function () { if (statsInterval) clearInterval(statsInterval); } };
+</script>

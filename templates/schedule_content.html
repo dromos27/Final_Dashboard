@@ -1,0 +1,454 @@
+<!-- templates/schedule_content.html - v5.1 -->
+<div class="container-fluid py-3">
+    <h2 class="tab-page-title">Room Schedule</h2>
+    <p class="tab-page-subtitle">Device control &amp; daily timetable</p>
+    <hr class="tab-page-rule">
+
+    <div class="row">
+        <!-- LEFT: CONTROLS -->
+        <div class="col-lg-4 mb-4">
+            <!-- Room -->
+            <div class="card mb-3" style="border: 2px solid #000000; border-radius: 12px; box-shadow: 0 4px 8px rgba(0,0,0,0.1);">
+                <div class="card-header" style="background-color: #000000; color: #FFD700; font-weight: bold; padding: 12px 15px;">📍 Room Selection</div>
+                <div class="card-body" style="background-color: #FFD700; padding: 15px;">
+                    <label class="form-label fw-bold text-dark mb-2">Select Room:</label>
+                    <select id="room-select" class="form-select" style="background-color: #FFFFFF; color: #212121; border: 1px solid #000000; font-weight: 500;">
+                        <option value="705">Room 705</option>
+                        <option value="101">Room 101</option>
+                        <option value="102">Room 102</option>
+                    </select>
+                </div>
+            </div>
+
+            <!-- AC Control -->
+            <div class="card" style="border: 2px solid #000000; border-radius: 12px; box-shadow: 0 4px 8px rgba(0,0,0,0.1);">
+                <div class="card-header d-flex justify-content-between align-items-center" style="background-color: #000000; color: #FFD700; font-weight: bold; padding: 12px 15px;">
+                    <span>⚡ Device Control</span>
+                    <span class="badge" style="background-color: #4CAF50; font-size: 0.75rem; padding: 4px 8px;">🟢 Connected</span>
+                </div>
+                <div class="card-body" style="background-color: #FFD700; padding: 20px;">
+                    <!-- AC -->
+                    <div class="mb-5">
+                        <h6 class="fw-bold mb-3" style="color: #212121; font-size: 0.95rem;">❄️ AIR CONDITIONER</h6>
+                        <div style="display: flex; gap: 8px; margin-bottom: 12px;">
+                            <button id="ac-on" type="button" style="flex: 1; padding: 12px; font-size: 0.9rem; border: 2px solid #000000; cursor: pointer; font-weight: bold; border-radius: 8px; background-color: #FFFFFF; color: #000000; transition: all 0.3s;">✓ ON</button>
+                            <button id="ac-off" type="button" style="flex: 1; padding: 12px; font-size: 0.9rem; border: 2px solid #000000; cursor: pointer; font-weight: bold; border-radius: 8px; background-color: #FFFFFF; color: #000000; transition: all 0.3s;">✗ OFF</button>
+                        </div>
+                        <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px;">
+                            <button id="ac-speed" type="button" style="padding: 10px; font-size: 0.8rem; border: 2px solid #000000; cursor: pointer; font-weight: bold; border-radius: 6px; background-color: #616161; color: white;">Speed</button>
+                            <button id="ac-timer" type="button" style="padding: 10px; font-size: 0.8rem; border: 2px solid #000000; cursor: pointer; font-weight: bold; border-radius: 6px; background-color: #616161; color: white;">Timer</button>
+                            <button id="ac-swing" type="button" style="padding: 10px; font-size: 0.8rem; border: 2px solid #000000; cursor: pointer; font-weight: bold; border-radius: 6px; background-color: #616161; color: white;">Swing</button>
+                        </div>
+                    </div>
+
+                    <!-- Lights -->
+                    <div class="mb-4">
+                        <h6 class="fw-bold mb-3" style="color: #212121; font-size: 0.95rem;">💡 LIGHTING</h6>
+                        <div style="display: flex; gap: 8px;">
+                            <button id="lights-on" type="button" style="flex: 1; padding: 12px; font-size: 0.9rem; border: 2px solid #000000; cursor: pointer; font-weight: bold; border-radius: 8px; background-color: #FFFFFF; color: #000000; transition: all 0.3s;">✓ ON</button>
+                            <button id="lights-off" type="button" style="flex: 1; padding: 12px; font-size: 0.9rem; border: 2px solid #000000; cursor: pointer; font-weight: bold; border-radius: 8px; background-color: #FFFFFF; color: #000000; transition: all 0.3s;">✗ OFF</button>
+                        </div>
+                    </div>
+
+                    <!-- Status -->
+                    <div class="p-3 rounded" style="background-color: #00000015; border-left: 4px solid #FFD700;">
+                        <h6 class="fw-bold mb-2" style="color: #212121; font-size: 0.85rem;">STATUS</h6>
+                        <div style="display: flex; gap: 15px; font-size: 0.85rem; flex-wrap: wrap;">
+                            <div>
+                                <small class="text-muted d-block mb-1">AC</small>
+                                <span class="badge" style="padding: 4px 8px; background-color: #616161;">OFF</span>
+                            </div>
+                            <div>
+                                <small class="text-muted d-block mb-1">Lights</small>
+                                <span class="badge" style="padding: 4px 8px; background-color: #616161;">OFF</span>
+                            </div>
+                        </div>
+                        <!-- Auto-light controller status -->
+                        <div id="auto-light-status" class="mt-3 p-2 rounded" style="background:#00000010; font-size:0.78rem;">
+                            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
+                                <strong style="color:#212121;">🤖 Auto-Light</strong>
+                                <span id="al-mode-badge" class="badge" style="background:#616161; font-size:0.7rem;">—</span>
+                            </div>
+                            <div id="al-event"     style="color:#444; margin-bottom:2px;">Starting…</div>
+                            <div id="al-countdown" style="color:#888; font-size:0.72rem;"></div>
+                            <div id="al-last-seen" style="color:#888; font-size:0.72rem;"></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- RIGHT: SCHEDULE -->
+        <div class="col-lg-8">
+            <div class="card" style="border: 2px solid #000000; border-radius: 12px; box-shadow: 0 4px 8px rgba(0,0,0,0.1);">
+                <!-- Header -->
+                <div class="card-header" style="background-color: #000000; color: #FFD700; font-weight: bold; padding: 15px;">
+                    <!-- Nav Row -->
+                    <div class="d-flex justify-content-between align-items-center mb-3">
+                        <button id="prev-btn" type="button" style="background-color: #FFD700; color: #000000; border: 2px solid #FFD700; padding: 8px 14px; font-weight: bold; border-radius: 6px; cursor: pointer;">◀ Prev</button>
+                        <h5 id="date-display" style="color: #FFD700; margin: 0; font-size: 1.1rem;">Monday, Jan 15, 2025</h5>
+                        <button id="next-btn" type="button" style="background-color: #FFD700; color: #000000; border: 2px solid #FFD700; padding: 8px 14px; font-weight: bold; border-radius: 6px; cursor: pointer;">Next ▶</button>
+                    </div>
+                    <!-- Calendar Row -->
+                    <div class="d-flex justify-content-between align-items-center">
+                        <input type="date" id="date-picker" class="form-control" style="background-color: #FFFFFF; color: #212121; border: 1px solid #FFD700; width: 160px; font-size: 0.85rem; padding: 6px;">
+                        <span id="room-display" style="background-color: #FFD700; color: #000000; padding: 6px 12px; font-weight: bold; border-radius: 6px;">Room 705 (Lab)</span>
+                    </div>
+                </div>
+
+                <!-- Schedule — scrollable container -->
+                <div class="card-body p-0" style="background-color: #FFD700;">
+                    <div id="schedule-container"
+                         style="padding: 20px;
+                                height: 520px;
+                                overflow-y: auto;
+                                overflow-x: hidden;
+                                background-color: #FFD700;
+                                scrollbar-width: thin;
+                                scrollbar-color: #000000 #FFD700;">
+                        <div class="text-center py-5">
+                            <div class="spinner-border text-dark mb-3" style="width: 2rem; height: 2rem;"></div>
+                            <h5 style="color: #212121;">Loading schedule...</h5>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Night-mode overrides for the schedule panel -->
+<style>
+/* Scrollbar styling for webkit browsers */
+#schedule-container::-webkit-scrollbar { width: 6px; }
+#schedule-container::-webkit-scrollbar-track { background: #FFD700; border-radius: 3px; }
+#schedule-container::-webkit-scrollbar-thumb { background: #000000; border-radius: 3px; }
+
+/* Night mode: flip the schedule container background and all text inside it */
+.content-area.night-mode #schedule-container {
+    background-color: #1a1a1a !important;
+    scrollbar-color: #FFD700 #1a1a1a;
+}
+.content-area.night-mode #schedule-container::-webkit-scrollbar-track { background: #1a1a1a; }
+.content-area.night-mode #schedule-container::-webkit-scrollbar-thumb { background: #FFD700; }
+
+/* Time labels */
+.content-area.night-mode .sched-time-label { color: #cccccc !important; }
+
+/* Gap / free-time blocks */
+.content-area.night-mode .sched-gap-block {
+    background-color: #2a2a2a !important;
+    border-color: #444 !important;
+    color: #888 !important;
+}
+.content-area.night-mode .sched-gap-block span { color: #666 !important; }
+
+/* Event name text */
+.content-area.night-mode .sched-event-name { color: #ffffff !important; }
+</style>
+
+<!-- Toast -->
+<div id="toast" style="position: fixed; bottom: 20px; right: 20px; min-width: 300px; z-index: 1050; display: none;">
+    <div class="alert alert-info alert-dismissible fade show" style="background-color: #000000; color: #FFD700; border: 2px solid #FFD700; margin: 0; box-shadow: 0 4px 12px rgba(0,0,0,0.3);">
+        <span id="toast-msg">Status</span>
+        <button type="button" class="btn-close" data-bs-dismiss="alert" style="filter: invert(1);"></button>
+    </div>
+</div>
+
+<script>
+(function () {
+
+// ============================================================================
+// STATE
+// ============================================================================
+var schedRoom = '705';
+var schedDate = new Date();
+schedDate.setHours(12, 0, 0, 0);
+const DAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+const ESP32_URL = "http://192.168.254.118/";
+
+// ============================================================================
+// INIT
+// ============================================================================
+document.addEventListener('DOMContentLoaded', function () {
+    console.log('Schedule tab loaded');
+    updateDisplay();
+    loadSchedule();
+    setupListeners();
+});
+
+// ============================================================================
+// DISPLAY
+// ============================================================================
+function updateDisplay() {
+    var day     = DAYS[schedDate.getDay()];
+    var month   = schedDate.toLocaleString('en-US', { month: 'short' });
+    var dateNum = schedDate.getDate();
+    var year    = schedDate.getFullYear();
+    document.getElementById('date-display').textContent = day + ', ' + month + ' ' + dateNum + ', ' + year;
+
+    var y = schedDate.getFullYear();
+    var m = String(schedDate.getMonth() + 1).padStart(2, '0');
+    var d = String(schedDate.getDate()).padStart(2, '0');
+    var isoStr = y + '-' + m + '-' + d;
+
+    var picker = document.getElementById('date-picker');
+    picker.removeEventListener('change', onPickerChange);
+    picker.value = isoStr;
+    picker.addEventListener('change', onPickerChange);
+
+    var roomType = schedRoom.startsWith('7') ? '(Lab)' : '(Office)';
+    document.getElementById('room-display').textContent = 'Room ' + schedRoom + ' ' + roomType;
+}
+
+// ============================================================================
+// SCHEDULE LOADING
+// ============================================================================
+function loadSchedule() {
+    var day = DAYS[schedDate.getDay()];
+    var url = '/api/schedule/' + schedRoom + '/' + day;
+
+    console.log('🔄 Loading: ' + url);
+
+    document.getElementById('schedule-container').innerHTML =
+        '<div class="text-center py-5">' +
+        '<div class="spinner-border text-dark mb-3" style="width: 2rem; height: 2rem;"></div>' +
+        '<h5 style="color: #212121;">Loading schedule...</h5>' +
+        '</div>';
+
+    fetch(url)
+        .then(function (r) {
+            if (!r.ok) throw new Error('HTTP ' + r.status);
+            return r.json();
+        })
+        .then(function (data) {
+            console.log('✅ Data:', data);
+            if (data && data.length > 0) {
+                showSchedule(data);
+            } else {
+                showEmpty(day);
+            }
+        })
+        .catch(function (err) {
+            console.error('❌ Error:', err);
+            showEmpty(day);
+        });
+}
+
+// ============================================================================
+// TIMELINE RENDERING
+// ============================================================================
+
+/** Convert "HH:MM" to total minutes since midnight */
+function toMinutes(timeStr) {
+    var parts = timeStr.split(':');
+    return parseInt(parts[0], 10) * 60 + parseInt(parts[1], 10);
+}
+
+/** Format minutes back to "HH:MM" */
+function toTimeStr(minutes) {
+    var h = Math.floor(minutes / 60);
+    var m = minutes % 60;
+    return String(h).padStart(2, '0') + ':' + String(m).padStart(2, '0');
+}
+
+function showSchedule(events) {
+    // Sort events by start time
+    events.sort(function (a, b) {
+        return toMinutes(a.start_time) - toMinutes(b.start_time);
+    });
+
+    // --- Layout constants ---
+    var PX_PER_MIN   = 1.8;   // pixels per minute — controls overall density
+    var MIN_EVENT_H  = 48;    // minimum px height for an event block
+    var MIN_GAP_H    = 36;    // minimum px height to show a gap block
+
+    var dayStart = toMinutes(events[0].start_time);
+    var dayEnd   = toMinutes(events[events.length - 1].end_time);
+
+    // Build list of segments: alternating event / gap
+    var segments = [];
+    for (var i = 0; i < events.length; i++) {
+        var evStart = toMinutes(events[i].start_time);
+        var evEnd   = toMinutes(events[i].end_time);
+
+        // Gap before this event?
+        var prevEnd = (i === 0) ? dayStart : toMinutes(events[i - 1].end_time);
+        if (evStart > prevEnd) {
+            segments.push({ type: 'gap', start: prevEnd, end: evStart });
+        }
+
+        segments.push({ type: 'event', data: events[i], start: evStart, end: evEnd });
+    }
+
+    // --- Build HTML ---
+    var html = '<div style="display: flex; flex-direction: column; gap: 0;">';
+
+    segments.forEach(function (seg) {
+        var durationMins = seg.end - seg.start;
+        var naturalHeight = Math.max(
+            seg.type === 'gap' ? MIN_GAP_H : MIN_EVENT_H,
+            durationMins * PX_PER_MIN
+        );
+
+        if (seg.type === 'event') {
+            var e = seg.data;
+            html +=
+                '<div style="display: flex; align-items: stretch; gap: 12px; height: ' + naturalHeight + 'px;">' +
+
+                // Time column
+                '<div style="width: 90px; flex-shrink: 0; display: flex; flex-direction: column; justify-content: space-between; padding: 6px 0;">' +
+                  '<strong class="sched-time-label" style="color: #212121; font-size: 0.82rem;">' + e.start_time + '</strong>' +
+                  '<strong class="sched-time-label" style="color: #212121; font-size: 0.82rem;">' + e.end_time + '</strong>' +
+                '</div>' +
+
+                // Spine
+                '<div style="width: 20px; flex-shrink: 0; display: flex; flex-direction: column; align-items: center;">' +
+                  '<div style="width: 14px; height: 14px; border-radius: 50%; background-color: #FFD700; border: 3px solid #000000; flex-shrink: 0; margin-top: 8px;"></div>' +
+                  '<div style="width: 3px; flex: 1; background-color: #000000; margin: 3px 0;"></div>' +
+                  '<div style="width: 10px; height: 10px; border-radius: 50%; background-color: #000000; flex-shrink: 0; margin-bottom: 8px;"></div>' +
+                '</div>' +
+
+                // Event block
+                '<div style="flex: 1; background-color: #2196F3; border: 2px solid #000000; border-radius: 10px; padding: 12px 14px; display: flex; align-items: center; box-shadow: 0 3px 8px rgba(0,0,0,0.15);">' +
+                  '<h6 class="sched-event-name" style="color: white; font-weight: 600; margin: 0; font-size: 0.88rem; line-height: 1.35;">' + e.event_name + '</h6>' +
+                '</div>' +
+
+                '</div>';  // end row
+
+        } else {
+            // Gap block — only render if there's meaningful time between events
+            if (durationMins >= 10) {
+                html +=
+                    '<div style="display: flex; align-items: stretch; gap: 12px; height: ' + naturalHeight + 'px;">' +
+
+                    // Time column — just show start of gap
+                    '<div style="width: 90px; flex-shrink: 0; display: flex; align-items: center; padding: 6px 0;">' +
+                      '<small class="sched-time-label" style="color: #888; font-size: 0.78rem;">' + toTimeStr(seg.start) + ' – ' + toTimeStr(seg.end) + '</small>' +
+                    '</div>' +
+
+                    // Spine — dashed for gaps
+                    '<div style="width: 20px; flex-shrink: 0; display: flex; flex-direction: column; align-items: center;">' +
+                      '<div style="width: 3px; flex: 1; border-left: 3px dashed #00000040;"></div>' +
+                    '</div>' +
+
+                    // Gap indicator
+                    '<div class="sched-gap-block" style="flex: 1; border: 2px dashed #00000030; border-radius: 10px; padding: 8px 14px; display: flex; align-items: center; background-color: rgba(0,0,0,0.04);">' +
+                      '<span style="color: #888; font-size: 0.8rem; font-style: italic;">🕐 ' + durationMins + ' min break — Room available</span>' +
+                    '</div>' +
+
+                    '</div>';
+            }
+        }
+    });
+
+    html += '</div>';
+    document.getElementById('schedule-container').innerHTML = html;
+    document.getElementById('schedule-container').scrollTop = 0;
+}
+
+function showEmpty(day) {
+    document.getElementById('schedule-container').innerHTML =
+        '<div style="text-align: center; padding: 60px 20px; background: linear-gradient(135deg, rgba(255,215,0,0.1) 0%, rgba(0,0,0,0.05) 100%); border-radius: 10px; border: 2px dashed #000000;">' +
+        '<h3 style="color: #212121; font-size: 1.5rem; margin-bottom: 15px;">📭 No Schedule</h3>' +
+        '<h5 style="color: #616161; font-size: 1.1rem;">No schedule for ' + day + '</h5>' +
+        '<p style="color: #616161;">Room is available all day</p>' +
+        '</div>';
+}
+
+// ============================================================================
+// PICKER HANDLER
+// ============================================================================
+function onPickerChange(e) {
+    if (!e.target.value) return;
+    var parts = e.target.value.split('-');
+    schedDate = new Date(parseInt(parts[0], 10), parseInt(parts[1], 10) - 1, parseInt(parts[2], 10), 12, 0, 0, 0);
+    updateDisplay();
+    loadSchedule();
+}
+
+// ============================================================================
+// LISTENERS
+// ============================================================================
+function setupListeners() {
+    document.getElementById('room-select').addEventListener('change', function (e) {
+        schedRoom = e.target.value;
+        updateDisplay();
+        loadSchedule();
+    });
+
+    document.getElementById('prev-btn').addEventListener('click', function () {
+        schedDate.setDate(schedDate.getDate() - 1);
+        updateDisplay();
+        loadSchedule();
+    });
+
+    document.getElementById('next-btn').addEventListener('click', function () {
+        schedDate.setDate(schedDate.getDate() + 1);
+        updateDisplay();
+        loadSchedule();
+    });
+
+    document.getElementById('date-picker').addEventListener('change', onPickerChange);
+
+    document.getElementById('ac-on').addEventListener('click',    function () { sendCmd('power',    'AC ON'); });
+    document.getElementById('ac-off').addEventListener('click',   function () { sendCmd('poweroff', 'AC OFF'); });
+    document.getElementById('ac-speed').addEventListener('click', function () { sendCmd('speed',    'Speed'); });
+    document.getElementById('ac-timer').addEventListener('click', function () { sendCmd('timer',    'Timer'); });
+    document.getElementById('ac-swing').addEventListener('click', function () { sendCmd('swing',    'Swing'); });
+
+    document.getElementById('lights-on').addEventListener('click',  function () { sendCmd('person', 'Lights ON'); });
+    document.getElementById('lights-off').addEventListener('click', function () { sendCmd('toggle', 'Lights OFF'); });
+}
+
+// ============================================================================
+// ESP32 + TOAST
+// ============================================================================
+function sendCmd(ep, name) {
+    toast('⏳ ' + name + '...');
+    fetch(ESP32_URL + ep)
+        .then(function () { toast('✅ ' + name); })
+        .catch(function () { toast('❌ ' + name + ' failed'); });
+}
+
+function toast(msg) {
+    var el = document.getElementById('toast');
+    document.getElementById('toast-msg').textContent = msg;
+    el.style.display = 'block';
+    setTimeout(function () { el.style.display = 'none'; }, 3000);
+}
+
+window.scheduleTab = { loadSchedule: loadSchedule };
+
+// ── Auto-light status polling ─────────────────────────────────────────────
+function updateAutoLightStatus() {
+    fetch('/api/auto-light/status')
+        .then(function(r) { return r.json(); })
+        .then(function(d) {
+            var modeColors = { 'SCHEDULE': '#4CAF50', 'PERSON': '#2196F3', 'OFF': '#616161' };
+            var modeLabels = { 'SCHEDULE': '📅 Schedule', 'PERSON': '👤 Person', 'OFF': '🔴 Off' };
+            var color = modeColors[d.mode] || '#616161';
+            var label = modeLabels[d.mode] || d.mode;
+
+            document.getElementById('al-mode-badge').textContent    = label;
+            document.getElementById('al-mode-badge').style.background = color;
+            document.getElementById('al-event').textContent          = d.event || '—';
+            document.getElementById('al-last-seen').textContent      = d.last_person_seen !== 'Never'
+                ? 'Last seen: ' + d.last_person_seen : 'No person detected yet';
+
+            var cd = document.getElementById('al-countdown');
+            if (d.countdown > 0) {
+                cd.textContent = '⏱ Turning off in ' + d.countdown + 's…';
+                cd.style.color = '#f59e0b';
+            } else {
+                cd.textContent = '';
+            }
+        })
+        .catch(function() {});
+}
+
+setInterval(updateAutoLightStatus, 3000);
+updateAutoLightStatus();
+
+})();
+</script>
