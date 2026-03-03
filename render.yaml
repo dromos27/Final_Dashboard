@@ -12,6 +12,8 @@ services:
     envVars:
       - key: PYTHON_VERSION
         value: "3.11.9"
+      - key: CLOUD_MODE
+        value: "true"
       - key: FLASK_ENV
         value: production
       - key: ESP32_CAM_IP

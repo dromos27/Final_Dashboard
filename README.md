@@ -118,7 +118,9 @@ Open **http://localhost:5000** in your browser.
 
 ## Deploying to Render
 
-[Render](https://render.com) is the recommended hosting platform — it supports long-running Python web services, background threads, and persistent disk storage (all required by this app).
+[Render](https://render.com) is the recommended hosting platform — it supports long-running Python web services with a generous free tier.
+
+> **Cloud mode:** The deploy uses a slim dependency set (`requirements-render.txt`) that excludes PyTorch, YOLO, and OpenCV to fit within the free tier's 512 MB memory limit. Camera and ESP32 features are automatically disabled via the `CLOUD_MODE=true` environment variable. The dashboard, historical data, predictions, and schedules all work normally.
 
 ### Quick Deploy (Blueprint)
 
@@ -143,12 +145,14 @@ Open **http://localhost:5000** in your browser.
 
 4. Under **Environment**, add:
    - `PYTHON_VERSION` = `3.11.9`
+   - `CLOUD_MODE` = `true`
 5. *(Optional)* Attach a **Disk** (1 GB, mounted at `/data`) for persistent SQLite storage — **requires a paid plan (Starter+)**. On the free tier, the DB is rebuilt from CSV on each deploy.
 6. Click **Deploy**.
 
 ### Important Notes for Cloud Deployment
 
-- **ESP32 hardware features** (live sensor data, camera stream, automatic lighting) require the ESP32 devices to be on the same network as the server. These features will **not work** when deployed to the cloud — the dashboard will still load and display historical/predicted data.
+- **CLOUD_MODE** strips ~1 GB of dependencies (PyTorch, YOLO, OpenCV) and disables camera/ESP32 threads to stay under 512 MB RAM.
+- **ESP32 hardware features** (live sensor data, camera stream, automatic lighting) require the ESP32 devices to be on the same network as the server. These features are disabled in cloud mode.
 - **Free tier** services spin down after 15 minutes of inactivity. The first request after a spin-down takes ~30 seconds.
 - **Free tier** does not support persistent disks — the SQLite database is rebuilt from `assets/energy_data.csv` on every deploy. Upgrade to Starter+ and uncomment the `disk` section in `render.yaml` for persistence.
 
@@ -212,6 +216,7 @@ python PA2_model_training.py
 
 | Variable | Default | Description |
 |----------|---------|-------------|
+| `CLOUD_MODE` | `false` | Set `true` to disable camera/ESP32/YOLO (required for Render free tier) |
 | `ESP32_CAM_IP` | `172.20.10.5` | IP address of the ESP32-CAM module |
 | `ESP32_DEVICE_IP` | `172.20.10.4` | IP address of the ESP32 energy sensor |
 | `FLASK_ENV` | `production` | Flask environment mode |

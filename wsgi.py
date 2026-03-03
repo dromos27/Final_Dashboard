@@ -10,11 +10,10 @@ import sys
 # Ensure project root is on sys.path
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
+CLOUD_MODE = os.environ.get('CLOUD_MODE', '').lower() in ('1', 'true', 'yes')
+
 # Import the Flask app object
-from A1_Boot_Dash import (
-    app, init_db, import_csv_to_db,
-    camera_loop, poll_esp32_device, auto_light_controller, lights_automation_loop
-)
+from A1_Boot_Dash import app, init_db, import_csv_to_db
 from threading import Thread
 
 # ---------- One-time initialization (runs once per worker) ----------
@@ -30,16 +29,21 @@ def _startup():
     init_db()
     import_csv_to_db()
 
-    # Start background threads (they will fail gracefully if ESP32 is unreachable)
-    for target, name in [
-        (camera_loop,            "Camera"),
-        (poll_esp32_device,      "ESP32 polling"),
-        (auto_light_controller,  "Auto-light"),
-        (lights_automation_loop, "Schedule fallback"),
-    ]:
-        t = Thread(target=target, daemon=True)
-        t.start()
-        print(f"[WSGI] {name} thread started")
+    if CLOUD_MODE:
+        print("[WSGI] CLOUD_MODE — skipping hardware threads (camera, ESP32)")
+    else:
+        from A1_Boot_Dash import (
+            camera_loop, poll_esp32_device, auto_light_controller, lights_automation_loop
+        )
+        for target, name in [
+            (camera_loop,            "Camera"),
+            (poll_esp32_device,      "ESP32 polling"),
+            (auto_light_controller,  "Auto-light"),
+            (lights_automation_loop, "Schedule fallback"),
+        ]:
+            t = Thread(target=target, daemon=True)
+            t.start()
+            print(f"[WSGI] {name} thread started")
 
     print("[WSGI] Startup complete")
 

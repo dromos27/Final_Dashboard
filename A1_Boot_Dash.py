@@ -4,8 +4,6 @@
 
 from flask import Flask, render_template, send_from_directory, jsonify, request, Response
 import os
-import cv2
-import torch
 import time
 import numpy as np
 import sqlite3
@@ -17,6 +15,23 @@ from threading import Thread, Lock
 from collections import defaultdict
 import sys
 import requests
+
+# Cloud mode: disables camera/ESP32/YOLO to fit in 512 MB RAM (Render free tier)
+CLOUD_MODE = os.environ.get('CLOUD_MODE', '').lower() in ('1', 'true', 'yes')
+
+if not CLOUD_MODE:
+    try:
+        import cv2
+        import torch
+    except ImportError:
+        cv2 = None
+        torch = None
+        CLOUD_MODE = True
+        print('cv2/torch not installed — forcing CLOUD_MODE')
+else:
+    cv2 = None
+    torch = None
+    print('CLOUD_MODE enabled — camera/YOLO disabled')
 
 # ============================================================================
 # PROJECT SETUP
@@ -47,17 +62,24 @@ device = "cuda" if torch.cuda.is_available() else "cpu"
 print(f"[✓] Using device: {device}")
 
 yolo_model = None
-try:
-    from ultralytics import YOLO
-    yolo_model = YOLO("yolov8n.pt").float()
-    yolo_model.fuse()
-    if device == "cuda":
-        yolo_model = yolo_model.half()
-    yolo_model.to(device)
-    yolo_model.conf = 0.5
-    print("[✓] YOLO model loaded successfully")
-except Exception as e:
-    print(f"[!] YOLO model load failed: {e}")
+device = "cpu"
+
+if not CLOUD_MODE:
+    device = "cuda" if torch and torch.cuda.is_available() else "cpu"
+    print(f"[✓] Using device: {device}")
+    try:
+        from ultralytics import YOLO
+        yolo_model = YOLO("yolov8n.pt").float()
+        yolo_model.fuse()
+        if device == "cuda":
+            yolo_model = yolo_model.half()
+        yolo_model.to(device)
+        yolo_model.conf = 0.5
+        print("[✓] YOLO model loaded successfully")
+    except Exception as e:
+        print(f"[!] YOLO model load failed: {e}")
+else:
+    print("[✓] CLOUD_MODE — YOLO model skipped")
 
 # ============================================================================
 # DATABASE SETUP
@@ -722,6 +744,8 @@ def serve_static(filename):
 
 @app.route('/video_feed')
 def video_feed():
+    if CLOUD_MODE or cv2 is None:
+        return jsonify({'error': 'Camera disabled in cloud mode'}), 503
     def generate():
         while True:
             with frame_lock:
