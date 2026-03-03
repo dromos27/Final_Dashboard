@@ -19,7 +19,10 @@ services:
       - key: ESP32_DEVICE_IP
         value: ""                       # Set to your ESP32 device IP when on the same network
     autoDeploy: true                    # Redeploy on every push to the linked branch
-    disk:
-      name: dashboard-data
-      mountPath: /data
-      sizeGB: 1                         # Persistent disk for SQLite DB + exports
+    # NOTE: Persistent disks require a paid plan (Starter+).
+    # On the free tier the SQLite DB is rebuilt from CSV on each deploy.
+    # Uncomment below if you upgrade to a paid plan:
+    # disk:
+    #   name: dashboard-data
+    #   mountPath: /data
+    #   sizeGB: 1

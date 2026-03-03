@@ -143,14 +143,14 @@ Open **http://localhost:5000** in your browser.
 
 4. Under **Environment**, add:
    - `PYTHON_VERSION` = `3.11.9`
-5. *(Optional)* Add a **Disk** (1 GB) mounted at `/data` for persistent SQLite storage.
+5. *(Optional)* Attach a **Disk** (1 GB, mounted at `/data`) for persistent SQLite storage — **requires a paid plan (Starter+)**. On the free tier, the DB is rebuilt from CSV on each deploy.
 6. Click **Deploy**.
 
 ### Important Notes for Cloud Deployment
 
 - **ESP32 hardware features** (live sensor data, camera stream, automatic lighting) require the ESP32 devices to be on the same network as the server. These features will **not work** when deployed to the cloud — the dashboard will still load and display historical/predicted data.
 - **Free tier** services spin down after 15 minutes of inactivity. The first request after a spin-down takes ~30 seconds.
-- For persistent data across redeploys, attach a **Render Disk** (free tier includes 1 GB).
+- **Free tier** does not support persistent disks — the SQLite database is rebuilt from `assets/energy_data.csv` on every deploy. Upgrade to Starter+ and uncomment the `disk` section in `render.yaml` for persistence.
 
 ---
 
