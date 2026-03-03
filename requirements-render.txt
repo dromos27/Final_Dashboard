@@ -1,7 +1,8 @@
 # ============================================================================
-# requirements-render.txt — Slim dependencies for Render free-tier (512 MB)
-# Excludes PyTorch, YOLO, OpenCV and other heavy packages not needed in cloud.
-# Camera & ESP32 features are disabled in cloud mode automatically.
+# requirements-render.txt — Minimal dependencies for Render free-tier (512 MB)
+# Only includes what A1_Boot_Dash.py actually imports at runtime.
+# Heavy ML libs (pandas, sklearn, xgboost, scipy, statsmodels) are NOT needed —
+# the cloud app uses raw SQL for predictions and stdlib csv for data import.
 # ============================================================================
 
 # --- Core Flask ---
@@ -19,16 +20,8 @@ requests==2.32.5
 urllib3==2.5.0
 Werkzeug==3.1.4
 
-# --- Data / ML (needed for predictions) ---
-joblib==1.5.2
+# --- Lightweight runtime deps ---
 numpy==2.2.6
-pandas==2.3.3
-scikit-learn==1.7.2
-scipy==1.16.3
-statsmodels==0.14.5
-xgboost==3.1.2
-threadpoolctl==3.6.0
-patsy==1.0.2
 
 # --- Misc utilities ---
 python-dateutil==2.9.0.post0

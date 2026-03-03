@@ -227,82 +227,43 @@ def db_prune_old_data(keep_days=365):
         print(f"[DB] Prune error: {e}")
 
 
+def _parse_csv_datetime(date_str, time_str):
+    """Parse date + time strings into 'YYYY-MM-DD HH:MM:SS'. Returns None on failure."""
+    d = date_str.strip()
+    t = time_str.strip()
+    if not d or not t:
+        return None
+    for fmt in ('%Y-%m-%d %I:%M:%S %p', '%Y-%m-%d %H:%M:%S'):
+        try:
+            dt = datetime.strptime(f"{d} {t}", fmt)
+            if 2020 <= dt.year <= 2030:
+                return dt.strftime('%Y-%m-%d %H:%M:%S')
+        except ValueError:
+            continue
+    return None
+
+
+def _safe_float(val, default=0.0):
+    try:
+        return float(val)
+    except (ValueError, TypeError):
+        return default
+
+
 def import_csv_to_db():
     """
     One-time migration: reads assets/energy_data.csv and inserts any rows
     that don't already exist in energy_log. Safe to call every startup.
-    Uses pandas to_sql for fast bulk insert (~seconds for 400k rows).
+    Uses stdlib csv + chunked inserts to stay under 512 MB RAM.
     """
-    import pandas as pd
-
     csv_path = os.path.join(current_dir, 'assets', 'energy_data.csv')
     if not os.path.exists(csv_path):
         print("[CSV→DB] No energy_data.csv found — skipping import")
         return
 
-    print(f"[CSV→DB] Starting import from {csv_path}…")
+    print(f"[CSV→DB] Starting import from {csv_path} …")
     try:
-        # ── Parse CSV ────────────────────────────────────────────────────────
-        df = pd.read_csv(csv_path, encoding='utf-8-sig', dtype=str)
-        df.columns = [c.strip().lstrip('\ufeff') for c in df.columns]
-        print(f"[CSV→DB] Read {len(df)} rows, columns: {list(df.columns)}")
-
-        print(f"[CSV→DB] Date sample: {df['Date'].head(5).tolist()}")
-
-        # Drop rows with empty/null Date or Time
-        df = df.dropna(subset=['Date', 'Time'])
-        df = df[df['Date'].str.strip() != '']
-        df = df[df['Time'].str.strip() != '']
-        print(f"[CSV→DB] Rows with valid Date+Time: {len(df)}")
-
-        # Parse datetime — Date is YYYY-MM-DD, Time is h:MM:SS AM/PM
-        dt_str = df['Date'].str.strip() + ' ' + df['Time'].str.strip()
-        df['_dt'] = pd.to_datetime(dt_str, format='%Y-%m-%d %I:%M:%S %p', errors='coerce')
-        # Fallback for 24-hour time format
-        mask = df['_dt'].isna()
-        if mask.any():
-            df.loc[mask, '_dt'] = pd.to_datetime(
-                dt_str[mask], format='%Y-%m-%d %H:%M:%S', errors='coerce'
-            )
-        nat_count = df['_dt'].isna().sum()
-        print(f"[CSV→DB] Datetime parse: {len(df) - nat_count} ok, {nat_count} failed")
-        df = df.dropna(subset=['_dt'])
-
-        # Filter out garbage years — only keep realistic dates (2020–2030)
-        df = df[df['_dt'].dt.year.between(2020, 2030)].copy()
-        df = df.dropna(subset=['_dt'])
-        df = df[df['_dt'].dt.year.between(2000, 2099)].copy()
-
-        # Numeric columns
-        for col in ['Voltage(V)', 'Current(A)', 'Power(W)', 'Energy(kWh)']:
-            df[col] = pd.to_numeric(df.get(col, 0), errors='coerce').fillna(0)
-
-        # Build final DataFrame matching energy_log schema
-        import_df = pd.DataFrame({
-            'timestamp':   df['_dt'].dt.strftime('%Y-%m-%d %H:%M:%S'),
-            'room':        '705',
-            'voltage':     df['Voltage(V)'].round(4),
-            'current':     df['Current(A)'].round(6),
-            'power':       df['Power(W)'].round(4),
-            'energy_kwh':  df['Energy(kWh)'].round(8),
-            'light_state': 'OFF',
-        })
-        print(f"[CSV→DB] Parsed {len(import_df)} valid rows spanning "
-              f"{import_df['timestamp'].min()} → {import_df['timestamp'].max()}")
-
-        # ── Insert into DB ───────────────────────────────────────────────────
         conn = sqlite3.connect(DB_PATH)
-
-        # Purge any previously imported rows with bad years
-        purged = conn.execute(
-            "DELETE FROM energy_log WHERE room='705' AND (CAST(strftime('%Y', timestamp) AS INTEGER) < 2020 OR CAST(strftime('%Y', timestamp) AS INTEGER) > 2030)"
-        ).rowcount
-        if purged:
-            print(f"[CSV→DB] Purged {purged} rows with bad years from DB")
-        conn.commit()
-
-        before = conn.execute("SELECT COUNT(*) FROM energy_log WHERE room='705'").fetchone()[0]
-        print(f"[CSV→DB] DB currently has {before} rows for room 705")
 
         # Ensure unique index exists so INSERT OR IGNORE works
         conn.execute("""
@@ -311,22 +272,60 @@ def import_csv_to_db():
         """)
         conn.commit()
 
-        # Write CSV rows to a temp table, then INSERT OR IGNORE into energy_log
-        import_df.to_sql('_csv_import_tmp', conn, if_exists='replace', index=False)
-        conn.execute("""
-            INSERT OR IGNORE INTO energy_log
-                (timestamp, room, voltage, current, power, energy_kwh, light_state)
-            SELECT timestamp, room, voltage, current, power, energy_kwh, light_state
-            FROM _csv_import_tmp
-        """)
-        conn.execute("DROP TABLE IF EXISTS _csv_import_tmp")
-        conn.commit()
+        before = conn.execute("SELECT COUNT(*) FROM energy_log WHERE room='705'").fetchone()[0]
+        print(f"[CSV→DB] DB currently has {before} rows for room 705")
+
+        CHUNK = 5000
+        buf = []
+        inserted = 0
+        skipped = 0
+
+        with open(csv_path, 'r', encoding='utf-8-sig') as f:
+            reader = csv.DictReader(f)
+            # Normalise header names (strip BOM / whitespace)
+            reader.fieldnames = [c.strip().lstrip('\ufeff') for c in reader.fieldnames]
+
+            for row in reader:
+                ts = _parse_csv_datetime(row.get('Date', ''), row.get('Time', ''))
+                if ts is None:
+                    skipped += 1
+                    continue
+                buf.append((
+                    ts,
+                    '705',
+                    round(_safe_float(row.get('Voltage(V)')), 4),
+                    round(_safe_float(row.get('Current(A)')), 6),
+                    round(_safe_float(row.get('Power(W)')),   4),
+                    round(_safe_float(row.get('Energy(kWh)')),8),
+                    'OFF',
+                ))
+                if len(buf) >= CHUNK:
+                    conn.executemany(
+                        "INSERT OR IGNORE INTO energy_log "
+                        "(timestamp,room,voltage,current,power,energy_kwh,light_state) "
+                        "VALUES (?,?,?,?,?,?,?)", buf
+                    )
+                    conn.commit()
+                    inserted += len(buf)
+                    buf.clear()
+
+            # flush remainder
+            if buf:
+                conn.executemany(
+                    "INSERT OR IGNORE INTO energy_log "
+                    "(timestamp,room,voltage,current,power,energy_kwh,light_state) "
+                    "VALUES (?,?,?,?,?,?,?)", buf
+                )
+                conn.commit()
+                inserted += len(buf)
+                buf.clear()
 
         after = conn.execute("SELECT COUNT(*) FROM energy_log WHERE room='705'").fetchone()[0]
         conn.close()
 
         added = after - before
-        print(f"[CSV→DB] ✅ Import done — {added} new rows added ({after} total in DB)")
+        print(f"[CSV→DB] ✅ Import done — processed {inserted} rows, "
+              f"skipped {skipped}, {added} new ({after} total in DB)")
 
     except Exception as e:
         print(f"[CSV→DB] ❌ Error: {e}")
