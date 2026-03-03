@@ -8,7 +8,6 @@ import cv2
 import torch
 import time
 import numpy as np
-import pandas as pd
 import sqlite3
 import csv
 import io
@@ -33,14 +32,12 @@ app = Flask(__name__)
 # ESP32 CONFIGURATION
 # ============================================================================
 
-ESP32_CAM_IP         = "192.168.254.103"
+ESP32_CAM_IP         = "172.20.10.5"
 ESP32_CAM_STREAM_URL = f"http://{ESP32_CAM_IP}/stream"
-ESP32_DEVICE_IP      = "192.168.254.118"
+ESP32_DEVICE_IP      = "172.20.10.4"
 ESP32_DEVICE_BASE_URL = f"http://{ESP32_DEVICE_IP}/"
 DETECTION_COOLDOWN   = 2
 
-# Lock so the CSV file is never written by two threads at once
-_csv_write_lock  = Lock()
 
 # ============================================================================
 # YOLO MODEL
@@ -197,7 +194,7 @@ def db_export_to_csv(room="705", days=7):
         return None
 
 
-def db_prune_old_data(keep_days=30):
+def db_prune_old_data(keep_days=365):
     try:
         cutoff = (datetime.now() - timedelta(days=keep_days)).strftime("%Y-%m-%d %H:%M:%S")
         conn = sqlite3.connect(DB_PATH)
@@ -210,121 +207,112 @@ def db_prune_old_data(keep_days=30):
     except Exception as e:
         print(f"[DB] Prune error: {e}")
 
-# ============================================================================
-# ENERGY_DATA.CSV — parsed ONCE at startup, cached in memory
-# ============================================================================
 
-ENERGY_CSV_PATH = os.path.join(current_dir, 'assets', 'energy_data.csv')
+def import_csv_to_db():
+    """
+    One-time migration: reads assets/energy_data.csv and inserts any rows
+    that don't already exist in energy_log. Safe to call every startup.
+    Uses pandas to_sql for fast bulk insert (~seconds for 400k rows).
+    """
+    import pandas as pd
 
-# Global cache — populated by _load_csv_cache() at startup
-_CSV_ROWS        = []          # list of dicts: {dt, date_str, voltage, current, power, energy_kwh}
-_CSV_DATES       = []          # sorted list of 'YYYY-MM-DD' strings
-_CSV_DATES_SET   = set()
-_CSV_BY_DATE     = {}          # 'YYYY-MM-DD' -> list of row dicts
-_CSV_LOADED      = False
-
-
-def _load_csv_cache():
-    """Parse energy_data.csv once using pandas and build lookup structures."""
-    global _CSV_ROWS, _CSV_DATES, _CSV_DATES_SET, _CSV_BY_DATE, _CSV_LOADED
-
-    print(f"[CSV] Loading: {ENERGY_CSV_PATH}")
-    if not os.path.exists(ENERGY_CSV_PATH):
-        print(f"[CSV] ❌ File not found: {ENERGY_CSV_PATH}")
+    csv_path = os.path.join(current_dir, 'assets', 'energy_data.csv')
+    if not os.path.exists(csv_path):
+        print("[CSV→DB] No energy_data.csv found — skipping import")
         return
 
+    print(f"[CSV→DB] Starting import from {csv_path}…")
     try:
-        df = pd.read_csv(ENERGY_CSV_PATH, encoding='utf-8-sig', dtype=str)
-
-        # Strip BOM and whitespace from column names
+        # ── Parse CSV ────────────────────────────────────────────────────────
+        df = pd.read_csv(csv_path, encoding='utf-8-sig', dtype=str)
         df.columns = [c.strip().lstrip('\ufeff') for c in df.columns]
-        print(f"[CSV] Columns : {list(df.columns)}")
-        print(f"[CSV] Rows    : {len(df)}")
-        print(f"[CSV] Sample  : {df.iloc[0].to_dict()}")
+        print(f"[CSV→DB] Read {len(df)} rows, columns: {list(df.columns)}")
 
-        # ── Extract year directly from the raw Date string (e.g. "1/21/2026" → 2026)
-        # This filters bad rows BEFORE pandas datetime ever touches them
-        df['_raw_year'] = pd.to_numeric(
-            df['Date'].str.strip().str.split('/').str[-1].str.strip(),
-            errors='coerce'
-        )
-        bad_year_pre = ~df['_raw_year'].between(2000, 2099)
-        if bad_year_pre.any():
-            print(f"[CSV] ⚠ Dropped {bad_year_pre.sum()} rows with bad raw year: {df.loc[bad_year_pre, '_raw_year'].dropna().unique().tolist()}")
-        df = df[~bad_year_pre].copy()
+        print(f"[CSV→DB] Date sample: {df['Date'].head(5).tolist()}")
 
-        # Build datetime string then parse with EXPLICIT format
-        # Data looks like: Date="1/21/2026"  Time="1:39:52 PM"
+        # Drop rows with empty/null Date or Time
+        df = df.dropna(subset=['Date', 'Time'])
+        df = df[df['Date'].str.strip() != '']
+        df = df[df['Time'].str.strip() != '']
+        print(f"[CSV→DB] Rows with valid Date+Time: {len(df)}")
+
+        # Parse datetime — Date is YYYY-MM-DD, Time is h:MM:SS AM/PM
         dt_str = df['Date'].str.strip() + ' ' + df['Time'].str.strip()
-
-        # Try the format that matches the actual data first
-        df['_dt'] = pd.to_datetime(dt_str, format='%m/%d/%Y %I:%M:%S %p', errors='coerce')
-
-        # Fallback: try 24-hour format for any rows that failed
-        mask_failed = df['_dt'].isna()
-        if mask_failed.any():
-            df.loc[mask_failed, '_dt'] = pd.to_datetime(
-                dt_str[mask_failed], format='%m/%d/%Y %H:%M:%S', errors='coerce'
+        df['_dt'] = pd.to_datetime(dt_str, format='%Y-%m-%d %I:%M:%S %p', errors='coerce')
+        # Fallback for 24-hour time format
+        mask = df['_dt'].isna()
+        if mask.any():
+            df.loc[mask, '_dt'] = pd.to_datetime(
+                dt_str[mask], format='%Y-%m-%d %H:%M:%S', errors='coerce'
             )
-
-        bad = df['_dt'].isna().sum()
-        if bad:
-            print(f"[CSV] ⚠ Dropped {bad} unparseable rows")
+        nat_count = df['_dt'].isna().sum()
+        print(f"[CSV→DB] Datetime parse: {len(df) - nat_count} ok, {nat_count} failed")
         df = df.dropna(subset=['_dt'])
 
-        # Final sanity check on parsed year
-        bad_year = ~df['_dt'].dt.year.between(2000, 2099)
-        if bad_year.any():
-            print(f"[CSV] ⚠ Dropped {bad_year.sum()} rows with bad parsed years: {df.loc[bad_year, '_dt'].dt.year.unique().tolist()}")
-            df = df[~bad_year]
+        # Filter out garbage years — only keep realistic dates (2020–2030)
+        df = df[df['_dt'].dt.year.between(2020, 2030)].copy()
+        df = df.dropna(subset=['_dt'])
+        df = df[df['_dt'].dt.year.between(2000, 2099)].copy()
 
         # Numeric columns
         for col in ['Voltage(V)', 'Current(A)', 'Power(W)', 'Energy(kWh)']:
             df[col] = pd.to_numeric(df.get(col, 0), errors='coerce').fillna(0)
 
-        df['_date_str'] = df['_dt'].dt.strftime('%Y-%m-%d')
+        # Build final DataFrame matching energy_log schema
+        import_df = pd.DataFrame({
+            'timestamp':   df['_dt'].dt.strftime('%Y-%m-%d %H:%M:%S'),
+            'room':        '705',
+            'voltage':     df['Voltage(V)'].round(4),
+            'current':     df['Current(A)'].round(6),
+            'power':       df['Power(W)'].round(4),
+            'energy_kwh':  df['Energy(kWh)'].round(8),
+            'light_state': 'OFF',
+        })
+        print(f"[CSV→DB] Parsed {len(import_df)} valid rows spanning "
+              f"{import_df['timestamp'].min()} → {import_df['timestamp'].max()}")
 
-        print(f"[CSV] Dates found: {sorted(df['_date_str'].unique().tolist())}")
+        # ── Insert into DB ───────────────────────────────────────────────────
+        conn = sqlite3.connect(DB_PATH)
 
-        # ── Build cache using vectorized ops (no iterrows) ──
-        _CSV_DATES     = sorted(df['_date_str'].unique().tolist())
-        _CSV_DATES_SET = set(_CSV_DATES)
+        # Purge any previously imported rows with bad years
+        purged = conn.execute(
+            "DELETE FROM energy_log WHERE room='705' AND (CAST(strftime('%Y', timestamp) AS INTEGER) < 2020 OR CAST(strftime('%Y', timestamp) AS INTEGER) > 2030)"
+        ).rowcount
+        if purged:
+            print(f"[CSV→DB] Purged {purged} rows with bad years from DB")
+        conn.commit()
 
-        # Convert to list of dicts via records — ~100x faster than iterrows
-        records = df[['_dt', '_date_str', 'Voltage(V)', 'Current(A)', 'Power(W)', 'Energy(kWh)']].to_dict('records')
+        before = conn.execute("SELECT COUNT(*) FROM energy_log WHERE room='705'").fetchone()[0]
+        print(f"[CSV→DB] DB currently has {before} rows for room 705")
 
-        _CSV_ROWS = [
-            {
-                'dt':         r['_dt'],
-                'date_str':   r['_date_str'],
-                'voltage':    float(r['Voltage(V)']),
-                'current':    float(r['Current(A)']),
-                'power':      float(r['Power(W)']),
-                'energy_kwh': float(r['Energy(kWh)']),
-            }
-            for r in records
-        ]
+        # Ensure unique index exists so INSERT OR IGNORE works
+        conn.execute("""
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_energy_ts_room
+            ON energy_log(timestamp, room)
+        """)
+        conn.commit()
 
-        # Group by date for O(1) per-request lookup
-        for r in _CSV_ROWS:
-            d = r['date_str']
-            if d not in _CSV_BY_DATE:
-                _CSV_BY_DATE[d] = []
-            _CSV_BY_DATE[d].append(r)
+        # Write CSV rows to a temp table, then INSERT OR IGNORE into energy_log
+        import_df.to_sql('_csv_import_tmp', conn, if_exists='replace', index=False)
+        conn.execute("""
+            INSERT OR IGNORE INTO energy_log
+                (timestamp, room, voltage, current, power, energy_kwh, light_state)
+            SELECT timestamp, room, voltage, current, power, energy_kwh, light_state
+            FROM _csv_import_tmp
+        """)
+        conn.execute("DROP TABLE IF EXISTS _csv_import_tmp")
+        conn.commit()
 
-        _CSV_LOADED = True
-        print(f"[CSV] ✅ Cached {len(_CSV_ROWS)} rows across {len(_CSV_DATES)} dates")
+        after = conn.execute("SELECT COUNT(*) FROM energy_log WHERE room='705'").fetchone()[0]
+        conn.close()
+
+        added = after - before
+        print(f"[CSV→DB] ✅ Import done — {added} new rows added ({after} total in DB)")
 
     except Exception as e:
-        print(f"[CSV] ❌ Error: {e}")
+        print(f"[CSV→DB] ❌ Error: {e}")
         import traceback; traceback.print_exc()
 
-
-def get_csv_rows(date_str=None):
-    """Return cached rows, optionally filtered to a single date_str ('YYYY-MM-DD')."""
-    if date_str:
-        return _CSV_BY_DATE.get(date_str, [])
-    return _CSV_ROWS
 
 
 # ============================================================================
@@ -332,20 +320,17 @@ def get_csv_rows(date_str=None):
 # ============================================================================
 
 def load_schedule_by_day(room, day_name):
-    """Load schedule from templates/room_schedules.csv"""
+    """Load schedule from assets/room_schedules.csv"""
     try:
-        schedule_file = os.path.join(current_dir, 'templates', 'room_schedules.csv')
-        print(f"[SCHEDULE] Looking for CSV at: {schedule_file}")
-        print(f"[SCHEDULE] File exists: {os.path.exists(schedule_file)}")
+        schedule_file = os.path.join(current_dir, 'assets', 'room_schedules.csv')
 
         if not os.path.exists(schedule_file):
-            print(f"[SCHEDULE] ❌ File NOT found. current_dir={current_dir}")
+            print(f"[SCHEDULE] ❌ File not found: {schedule_file}")
             return []
 
         schedule_data = []
         with open(schedule_file, 'r', encoding='utf-8-sig') as f:
             reader = csv.DictReader(f)
-            print(f"[SCHEDULE] CSV columns: {reader.fieldnames}")
             for row in reader:
                 row_room = str(row.get('room', '')).strip()
                 row_day  = str(row.get('day',  '')).strip().lower()
@@ -357,7 +342,6 @@ def load_schedule_by_day(room, day_name):
                         'day':        row_day
                     })
 
-        print(f"[SCHEDULE] ✅ Found {len(schedule_data)} events for Room {room} on {day_name}")
         return schedule_data
 
     except Exception as e:
@@ -392,6 +376,7 @@ current_history = []
 MAX_HISTORY     = 60
 
 detection_enabled = True
+PERSON_CONFIDENCE_THRESHOLD = 0.70   # detections below this % are ignored (not counted, don't trigger lights)
 
 # ============================================================================
 # ESP32 POLLING THREAD
@@ -477,14 +462,6 @@ def poll_esp32_device():
                               parsed.get("energy_kwh", 0),
                               parsed.get("light_state","OFF"))
 
-                # 2. Append to energy_data.csv using ESP32's NTP timestamp
-                _append_to_energy_csv({
-                    'dt':         dt,
-                    'voltage':    parsed.get("voltage",    0),
-                    'current':    parsed.get("current",    0),
-                    'power':      parsed.get("power",      0),
-                    'energy_kwh': parsed.get("energy_kwh", 0),
-                })
 
                 prune_counter += 1
                 if prune_counter % 10 == 0:
@@ -678,22 +655,30 @@ def camera_loop():
                     h, w    = frame.shape[:2]
                     for r in results:
                         for box in r.boxes:
-                            cls = int(box.cls[0])
-                            if cls == 0:
-                                persons += 1
-                                conf     = float(box.conf[0])
-                                confidences.append(conf)
-                                x1, y1, x2, y2 = map(int, box.xyxy[0])
-                                x1 = int(x1 * w / 640); y1 = int(y1 * h / 480)
-                                x2 = int(x2 * w / 640); y2 = int(y2 * h / 480)
-                                cv2.rectangle(frame, (x1,y1),(x2,y2),(0,215,255),3)
-                                cv2.putText(frame, f"Person {int(conf*100)}%", (x1,y1-10),
-                                            cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0,215,255), 2)
+                            cls  = int(box.cls[0])
+                            conf = float(box.conf[0])
+                            if cls != 0:
+                                continue   # not a person class
+                            x1, y1, x2, y2 = map(int, box.xyxy[0])
+                            x1 = int(x1 * w / 640); y1 = int(y1 * h / 480)
+                            x2 = int(x2 * w / 640); y2 = int(y2 * h / 480)
+                            if conf < PERSON_CONFIDENCE_THRESHOLD:
+                                # Draw grey box — detected but below threshold, ignored
+                                cv2.rectangle(frame, (x1,y1),(x2,y2),(128,128,128),2)
+                                cv2.putText(frame, f"? {int(conf*100)}% (ignored)",
+                                            (x1,y1-10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (128,128,128), 1)
+                                continue   # does NOT count as a person
+                            # Passes threshold — count it
+                            persons += 1
+                            confidences.append(conf)
+                            cv2.rectangle(frame, (x1,y1),(x2,y2),(0,215,255),3)
+                            cv2.putText(frame, f"Person {int(conf*100)}%",
+                                        (x1,y1-10), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0,215,255), 2)
                 person_count_global    = persons
                 avg_confidence_global  = int(sum(confidences)/len(confidences)*100) if confidences else 0
-                status_text = f"Persons: {persons} | {'OCCUPIED' if persons>0 else 'VACANT'}"
+                status_text = f"Persons: {persons} | {'OCCUPIED' if persons>0 else 'VACANT'} | Min conf: {int(PERSON_CONFIDENCE_THRESHOLD*100)}%"
                 color = (0,255,0) if persons == 0 else (0,0,255)
-                cv2.putText(frame, status_text, (10,30), cv2.FONT_HERSHEY_SIMPLEX, 0.8, color, 2)
+                cv2.putText(frame, status_text, (10,30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, color, 2)
                 if persons > 0:
                     now = time.time()
                     if now - last_notification_time > DETECTION_COOLDOWN:
@@ -758,10 +743,23 @@ def video_feed():
 @app.route('/api/camera/stats')
 def camera_stats():
     return jsonify({
-        'person_count': person_count_global, 'avg_confidence': avg_confidence_global,
-        'occupied': person_count_global > 0, 'camera_connected': camera_connected,
-        'timestamp': datetime.now().isoformat()
+        'person_count':               person_count_global,
+        'avg_confidence':             avg_confidence_global,
+        'occupied':                   person_count_global > 0,
+        'camera_connected':           camera_connected,
+        'confidence_threshold':       int(PERSON_CONFIDENCE_THRESHOLD * 100),
+        'timestamp':                  datetime.now().isoformat()
     })
+
+
+@app.route('/api/camera/confidence-threshold', methods=['GET', 'POST'])
+def set_confidence_threshold():
+    global PERSON_CONFIDENCE_THRESHOLD
+    if request.method == 'POST':
+        val = request.json.get('threshold', 70)
+        PERSON_CONFIDENCE_THRESHOLD = max(0.1, min(0.99, float(val) / 100))
+        print(f"[CAMERA] Confidence threshold set to {int(PERSON_CONFIDENCE_THRESHOLD*100)}%")
+    return jsonify({'threshold': int(PERSON_CONFIDENCE_THRESHOLD * 100)})
 
 
 @app.route('/api/camera/status')
@@ -829,37 +827,21 @@ def export_energy_csv():
     return jsonify({'success': False, 'error': 'No data to export'}), 404
 
 
+
 # ============================================================================
-# ENERGY_DATA.CSV ROUTES (historical chart + predictions)
+# ENERGY CHART + PREDICTIONS (DB only)
 # ============================================================================
 
-@app.route('/api/debug/csv')
-def debug_csv():
-    return jsonify({
-        'path':            ENERGY_CSV_PATH,
-        'exists':          os.path.exists(ENERGY_CSV_PATH),
-        'loaded':          _CSV_LOADED,
-        'rows_cached':     len(_CSV_ROWS),
-        'available_dates': _CSV_DATES,
-        'sample':          {
-            'dt':      _CSV_ROWS[0]['dt'].strftime('%Y-%m-%d %H:%M:%S'),
-            'power':   _CSV_ROWS[0]['power'],
-            'voltage': _CSV_ROWS[0]['voltage'],
-        } if _CSV_ROWS else None
-    })
-
-
+@app.route('/api/energy/chart')
 @app.route('/api/energy/live-chart')
-def live_chart():
+def energy_chart():
     """
-    Real-time chart data from SQLite for a specific date.
-    Buckets readings into 15-minute intervals — same format as csv-chart.
-    Used by the Overview tab for today's date so new readings appear instantly.
+    15-minute bucketed power chart from SQLite for any date.
+    Works for today (live) and historical dates equally.
     """
     date_param = request.args.get('date', datetime.now().strftime('%Y-%m-%d')).strip()
     room       = request.args.get('room', '705')
 
-    # Date window: full day from 00:00:00 to 23:59:59
     day_start = f"{date_param} 00:00:00"
     day_end   = f"{date_param} 23:59:59"
 
@@ -878,14 +860,46 @@ def live_chart():
         return jsonify({'success': False, 'error': str(e)}), 500
 
     if not rows:
+        # No data for this date — tell the frontend which dates are available
+        try:
+            conn = sqlite3.connect(DB_PATH)
+            date_rows = conn.execute(
+                "SELECT DISTINCT DATE(timestamp) as d FROM energy_log WHERE room=? ORDER BY d ASC",
+                (room,)
+            ).fetchall()
+            conn.close()
+            available = [r[0] for r in date_rows]
+        except Exception:
+            available = []
         return jsonify({
-            'success': False,
-            'error':   f'No DB data for {date_param}',
-            'source':  'db'
+            'success':         False,
+            'error':           f'No data for {date_param}',
+            'available_dates': available,
+            'source':          'db'
         }), 404
 
-    # 15-minute bucket aggregation — same logic as csv-chart
-    from collections import defaultdict
+    return energy_chart_for_date(date_param, room, rows)
+
+
+def energy_chart_for_date(date_str, room, rows=None):
+    """Build chart JSON for a given date. Fetches rows from DB if not provided."""
+    if rows is None:
+        day_start = f"{date_str} 00:00:00"
+        day_end   = f"{date_str} 23:59:59"
+        try:
+            conn = sqlite3.connect(DB_PATH)
+            conn.row_factory = sqlite3.Row
+            rows = conn.execute(
+                """SELECT timestamp, voltage, current, power, energy_kwh
+                   FROM energy_log
+                   WHERE room=? AND timestamp >= ? AND timestamp <= ?
+                   ORDER BY timestamp ASC""",
+                (room, day_start, day_end)
+            ).fetchall()
+            conn.close()
+        except Exception as e:
+            return jsonify({'success': False, 'error': str(e)}), 500
+
     buckets = defaultdict(list)
     for r in rows:
         try:
@@ -908,7 +922,7 @@ def live_chart():
 
     return jsonify({
         'success':    True,
-        'date':       date_param,
+        'date':       date_str,
         'source':     'db',
         'labels':     labels,
         'power_data': power_data,
@@ -923,111 +937,78 @@ def live_chart():
     })
 
 
-@app.route('/api/energy/csv-chart')
-def csv_chart():
-    """Returns 15-min bucketed power data for the chart from the in-memory cache."""
-    if not _CSV_LOADED:
-        return jsonify({'success': False, 'error': 'CSV cache not loaded'}), 503
-
-    date_param = request.args.get('date', '').strip()
-    if not date_param:
-        # Pick the date in the CSV closest to today without going over
-        today_str = datetime.now().strftime('%Y-%m-%d')
-        past_dates = [d for d in _CSV_DATES if d <= today_str]
-        target_str = past_dates[-1] if past_dates else (_CSV_DATES[0] if _CSV_DATES else '')
-    else:
-        target_str = date_param if date_param in _CSV_DATES_SET else ''
-        if not target_str:
-            today_str = datetime.now().strftime('%Y-%m-%d')
-            past_dates = [d for d in _CSV_DATES if d <= today_str]
-            target_str = past_dates[-1] if past_dates else (_CSV_DATES[0] if _CSV_DATES else '')
-
-    if not target_str:
-        return jsonify({'success': False, 'error': 'No data available'}), 404
-
-    day_rows = _CSV_BY_DATE.get(target_str, [])
-    if not day_rows:
-        return jsonify({'success': False, 'error': f'No data for {target_str}', 'available_dates': _CSV_DATES}), 404
-
-    # 15-minute buckets
-    buckets = defaultdict(list)
-    for r in day_rows:
-        m     = r['dt'].hour * 60 + r['dt'].minute
-        start = (m // 15) * 15
-        label = f"{start // 60:02d}:{start % 60:02d}"
-        buckets[label].append(r['power'])
-
-    sorted_b   = sorted(buckets.items())
-    labels     = [b[0] for b in sorted_b]
-    power_data = [round(sum(b[1]) / len(b[1]), 2) for b in sorted_b]
-
-    all_power   = [r['power']      for r in day_rows]
-    all_voltage = [r['voltage']    for r in day_rows]
-    all_current = [r['current']    for r in day_rows]
-    all_energy  = [r['energy_kwh'] for r in day_rows]
-
-    return jsonify({
-        'success':         True,
-        'date':            target_str,
-        'available_dates': _CSV_DATES,
-        'labels':          labels,
-        'power_data':      power_data,
-        'summary': {
-            'avg_power':    round(sum(all_power)   / len(all_power),   2),
-            'max_power':    round(max(all_power),   2),
-            'avg_voltage':  round(sum(all_voltage) / len(all_voltage), 2),
-            'avg_current':  round(sum(all_current) / len(all_current), 6),
-            'total_energy': round(max(all_energy)  - min(all_energy),  4),
-            'data_points':  len(day_rows),
-        }
-    })
+@app.route('/api/energy/available-dates')
+def available_dates():
+    """Return all dates that have data in the DB, for the date picker."""
+    room = request.args.get('room', '705')
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        rows = conn.execute(
+            "SELECT DISTINCT DATE(timestamp) as d FROM energy_log WHERE room=? ORDER BY d ASC",
+            (room,)
+        ).fetchall()
+        conn.close()
+        return jsonify({'success': True, 'dates': [r[0] for r in rows]})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
 
 
 @app.route('/api/predict-energy')
 def predict_energy():
-    """Predict hourly energy using historical CSV data.
-    If the target day-of-week has negligible consumption in history, predicts 0.
+    """
+    Predict hourly energy for a target date using historical DB data.
+    Groups by day-of-week. If that weekday historically shows ~0W, returns zeros.
     """
     date_param = request.args.get('date', '').strip()
     room_param = request.args.get('room', '705')
 
     if not date_param:
         return jsonify({'error': 'date parameter required'}), 400
-    if not _CSV_LOADED:
-        return jsonify({'error': 'CSV cache not loaded yet'}), 503
 
     try:
         target_dt = datetime.strptime(date_param, '%Y-%m-%d')
     except ValueError:
         return jsonify({'error': 'Invalid date format, use YYYY-MM-DD'}), 400
 
-    target_weekday = target_dt.weekday()   # 0=Mon … 6=Sun
+    target_weekday = target_dt.weekday()
     dow_labels     = ['Monday','Tuesday','Wednesday','Thursday','Friday','Saturday','Sunday']
 
-    # ── Step 1: Gather all rows that share the same day-of-week ──────────────
-    same_dow_rows = [r for r in _CSV_ROWS if r['dt'].weekday() == target_weekday]
+    # Pull all historical rows from DB grouped by weekday
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        conn.row_factory = sqlite3.Row
 
-    # ── Step 2: Check if that day-of-week has meaningful consumption ─────────
-    # A day is considered "zero consumption" if the average power across ALL
-    # historical readings for that weekday is below a noise threshold (5 W).
+        # All rows for this room
+        all_rows = conn.execute(
+            "SELECT timestamp, power, energy_kwh FROM energy_log WHERE room=? ORDER BY timestamp ASC",
+            (room_param,)
+        ).fetchall()
+        conn.close()
+    except Exception as e:
+        return jsonify({'error': f'DB error: {e}'}), 500
+
+    if not all_rows:
+        return jsonify({'error': 'No historical data in database yet'}), 404
+
+    # Parse timestamps and group by weekday
+    parsed_rows = []
+    for r in all_rows:
+        try:
+            dt = datetime.strptime(r['timestamp'], '%Y-%m-%d %H:%M:%S')
+            parsed_rows.append({'dt': dt, 'power': r['power'], 'energy_kwh': r['energy_kwh']})
+        except Exception:
+            continue
+
+    same_dow_rows = [r for r in parsed_rows if r['dt'].weekday() == target_weekday]
+
+    # Zero-day check: if this weekday averages below 5W historically → predict 0
     ZERO_THRESHOLD_W = 5.0
+    dow_avg_power = (sum(r['power'] for r in same_dow_rows) / len(same_dow_rows)) if same_dow_rows else 0.0
+    is_zero_day   = dow_avg_power < ZERO_THRESHOLD_W
 
-    if same_dow_rows:
-        dow_avg_power = sum(r['power'] for r in same_dow_rows) / len(same_dow_rows)
-    else:
-        dow_avg_power = 0.0
+    print(f"[PREDICT] {dow_labels[target_weekday]} | DB rows: {len(same_dow_rows)} | avg: {dow_avg_power:.2f}W | zero: {is_zero_day}")
 
-    is_zero_day = dow_avg_power < ZERO_THRESHOLD_W
-
-    print(f"[PREDICT] {dow_labels[target_weekday]} | historical rows: {len(same_dow_rows)} | avg power: {dow_avg_power:.2f} W | zero_day: {is_zero_day}")
-
-    # ── Step 3: If zero day, return all zeros immediately ────────────────────
     if is_zero_day:
-        recommendations = [
-            f"{dow_labels[target_weekday]}s show no energy consumption in historical data — room is unoccupied.",
-            "No classes or activities are scheduled on this day of the week.",
-            "Predicted consumption: 0 kWh."
-        ]
         return jsonify({
             'success':              True,
             'date':                 date_param,
@@ -1043,46 +1024,45 @@ def predict_energy():
             'hourly_breakdown':     [0.0] * 24,
             'hourly_power_w':       [0.0] * 24,
             'confidence':           95,
-            'recommendations':      recommendations,
-            'data_source':          'energy_data.csv',
-            'historical_rows_used': len(_CSV_ROWS),
+            'recommendations':      [
+                f"{dow_labels[target_weekday]}s show no energy consumption in historical data.",
+                "No classes or activities are scheduled on this day of the week.",
+                "Predicted consumption: 0 kWh."
+            ],
+            'data_source':          'energy_dashboard.db',
+            'historical_rows_used': len(parsed_rows),
         })
 
-    # ── Step 4: Active day — build hourly averages from same-weekday rows ────
-    # Weight same-weekday rows 2× vs all other rows for accuracy
+    # Build hourly averages — weight same-weekday rows 2x
     hourly_power = defaultdict(list)
-    for r in _CSV_ROWS:
+    for r in parsed_rows:
         weight = 2 if r['dt'].weekday() == target_weekday else 1
         for _ in range(weight):
             hourly_power[r['dt'].hour].append(r['power'])
 
-    # For any hour with no data at all, use the same-weekday average
-    dow_global_avg = dow_avg_power
-
     hourly_avg_w = []
     for h in range(24):
         vals = hourly_power.get(h, [])
-        avg  = (sum(vals) / len(vals)) if vals else dow_global_avg
+        avg  = (sum(vals) / len(vals)) if vals else dow_avg_power
         hourly_avg_w.append(round(avg, 2))
 
     hourly_kwh = [round(w / 1000, 4) for w in hourly_avg_w]
     total_kwh  = round(sum(hourly_kwh), 4)
     rate       = 11.0
     total_cost = round(total_kwh * rate, 2)
-
     confidence = min(95, 60 + len(same_dow_rows) // 10)
 
     recommendations = []
     peak_hour  = hourly_avg_w.index(max(hourly_avg_w))
     peak_power = max(hourly_avg_w)
     if peak_power > 500:
-        recommendations.append(f"Peak usage expected around {peak_hour:02d}:00 ({peak_power:.0f} W) — consider load scheduling.")
+        recommendations.append(f"Peak usage expected around {peak_hour:02d}:00 ({peak_power:.0f} W).")
     if total_kwh > 5:
         recommendations.append(f"Projected {total_kwh} kWh — consider turning off AC during unscheduled hours.")
     if total_kwh <= 1:
         recommendations.append("Low energy day projected based on historical patterns.")
     if not recommendations:
-        recommendations.append(f"Normal {dow_labels[target_weekday]} usage projected based on historical patterns.")
+        recommendations.append(f"Normal {dow_labels[target_weekday]} usage projected.")
 
     return jsonify({
         'success':              True,
@@ -1100,14 +1080,25 @@ def predict_energy():
         'hourly_power_w':       hourly_avg_w,
         'confidence':           confidence,
         'recommendations':      recommendations,
-        'data_source':          'energy_data.csv',
-        'historical_rows_used': len(_CSV_ROWS),
+        'data_source':          'energy_dashboard.db',
+        'historical_rows_used': len(parsed_rows),
     })
+
 
 
 @app.route('/api/predictive-rooms')
 def predictive_rooms():
-    return jsonify({'rooms': ['101', '102', '705']})
+    """Return rooms that actually have energy data in the DB."""
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        rows = conn.execute(
+            "SELECT DISTINCT room FROM energy_log ORDER BY room ASC"
+        ).fetchall()
+        conn.close()
+        rooms = [r[0] for r in rows] if rows else ['705']
+        return jsonify({'rooms': rooms})
+    except Exception as e:
+        return jsonify({'rooms': ['705'], 'error': str(e)})
 
 
 @app.route('/api/auto-light/status')
@@ -1159,21 +1150,20 @@ def health_check():
 
 if __name__ == '__main__':
     print("=" * 70)
-    print("ENERGY DASHBOARD v3.5 — STARTING")
+    print("ENERGY DASHBOARD v4.0 — DB-only mode")
     print("=" * 70)
 
     init_db()
-    _load_csv_cache()   # parse energy_data.csv once into memory
+    import_csv_to_db()   # one-time migration of energy_data.csv → DB (safe to re-run)
 
     print(f"Dashboard URL    : http://localhost:5000")
     print(f"ESP32-CAM Stream : {ESP32_CAM_STREAM_URL}")
     print(f"ESP32 Device     : {ESP32_DEVICE_BASE_URL}")
-    print(f"CSV Debug        : http://localhost:5000/api/debug/csv")
-    print(f"CSV Chart API    : http://localhost:5000/api/energy/csv-chart")
-    print(f"Predict API      : http://localhost:5000/api/predict-energy?date=2026-01-21&room=705")
+    print(f"Chart API        : http://localhost:5000/api/energy/chart")
+    print(f"Predict API      : http://localhost:5000/api/predict-energy?date=2026-03-02&room=705")
+    print(f"Available Dates  : http://localhost:5000/api/energy/available-dates")
     print(f"Schedule API     : http://localhost:5000/api/schedule/705/Monday")
     print(f"Database         : {DB_PATH}")
-    print(f"Energy CSV       : {ENERGY_CSV_PATH}")
     print("=" * 70)
 
     cam_thread = Thread(target=camera_loop, daemon=True)

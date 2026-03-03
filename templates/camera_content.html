@@ -1,7 +1,6 @@
 <!-- templates/camera_content.html -->
 <div class="container-fluid py-3">
 
-    <!-- Shared page header -->
     <h2 class="tab-page-title">Camera Feed</h2>
     <p class="tab-page-subtitle">ESP32-CAM · YOLOv8 person detection</p>
     <hr class="tab-page-rule">
@@ -62,6 +61,11 @@
                              alt="ESP32-CAM Feed">
                     </div>
                 </div>
+                <!-- Legend below feed -->
+                <div class="px-3 py-2" style="background:#111; font-size:0.78rem; color:#aaa; display:flex; gap:20px;">
+                    <span><span style="display:inline-block;width:12px;height:12px;background:#00D7FF;border-radius:2px;margin-right:4px;"></span>Person (above threshold)</span>
+                    <span><span style="display:inline-block;width:12px;height:12px;background:#808080;border-radius:2px;margin-right:4px;"></span>Ignored (below threshold)</span>
+                </div>
             </div>
         </div>
 
@@ -86,6 +90,27 @@
                             <small style="color: #616161;">Avg Confidence</small>
                         </div>
                     </div>
+
+                    <!-- Confidence Threshold Slider -->
+                    <div class="mb-3 p-2 rounded" style="background: rgba(0,0,0,0.08); border: 1px solid rgba(0,0,0,0.15);">
+                        <div class="d-flex justify-content-between align-items-center mb-1">
+                            <small class="fw-bold" style="color:#212121;">🎯 Min Confidence Threshold</small>
+                            <span id="threshold-display" class="fw-bold"
+                                  style="color:#000; background:#FFD700; border:1px solid #000; border-radius:4px; padding:1px 7px; font-size:0.95rem;">
+                                70%
+                            </span>
+                        </div>
+                        <input type="range" id="confidence-slider" min="30" max="95" value="70" step="5"
+                               class="form-range" style="accent-color: #000;">
+                        <div class="d-flex justify-content-between" style="font-size:0.7rem; color:#616161;">
+                            <span>30% (loose)</span>
+                            <span>95% (strict)</span>
+                        </div>
+                        <small style="color:#616161; font-size:0.72rem;">
+                            Detections below this confidence are shown in grey and <strong>do not</strong> count as persons or trigger lights.
+                        </small>
+                    </div>
+
                     <div class="d-grid gap-2">
                         <button id="detection-toggle-btn" class="btn fw-bold"
                                 style="background-color: #000; color: #FFD700; border: 2px solid #000;">
@@ -142,16 +167,41 @@
 </div>
 
 <script>
-    let detectionLog = [];
-    let statsInterval = null;
+    let detectionLog    = [];
+    let statsInterval   = null;
     let lastPersonCount = -1;
+    let currentThreshold = 70;   // mirrors server value
 
     document.addEventListener('DOMContentLoaded', function () {
         startStatsPolling();
         setupListeners();
         updateLastUpdateTime();
+        loadThresholdFromServer();
     });
 
+    // ── Threshold ─────────────────────────────────────────────────────────────
+    function loadThresholdFromServer() {
+        fetch('/api/camera/confidence-threshold')
+            .then(r => r.json())
+            .then(function (d) {
+                currentThreshold = d.threshold;
+                document.getElementById('confidence-slider').value   = currentThreshold;
+                document.getElementById('threshold-display').textContent = currentThreshold + '%';
+            })
+            .catch(function () {});
+    }
+
+    function setThreshold(value) {
+        currentThreshold = value;
+        document.getElementById('threshold-display').textContent = value + '%';
+        fetch('/api/camera/confidence-threshold', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ threshold: value })
+        }).catch(function () {});
+    }
+
+    // ── Stats polling ─────────────────────────────────────────────────────────
     function startStatsPolling() {
         if (statsInterval) clearInterval(statsInterval);
         statsInterval = setInterval(fetchStats, 1000);
@@ -161,45 +211,80 @@
     function fetchStats() {
         fetch('/api/camera/stats')
             .then(r => r.json())
-            .then(data => updateUI(data))
-            .catch(() => { document.getElementById('cam-status-text').textContent = '❌ Cannot reach server'; });
+            .then(function (data) {
+                updateUI(data);
+                // Keep slider in sync if threshold was changed elsewhere
+                if (data.confidence_threshold && data.confidence_threshold !== currentThreshold) {
+                    currentThreshold = data.confidence_threshold;
+                    document.getElementById('confidence-slider').value      = currentThreshold;
+                    document.getElementById('threshold-display').textContent = currentThreshold + '%';
+                }
+            })
+            .catch(function () {
+                document.getElementById('cam-status-text').textContent = '❌ Cannot reach server';
+            });
     }
 
     function updateUI(data) {
         const statusEl = document.getElementById('cam-status-text');
-        if (data.camera_connected) { statusEl.textContent = '✅ ESP32-CAM Connected'; statusEl.style.color = '#2E7D32'; }
-        else { statusEl.textContent = '⚠️ Connecting to ESP32-CAM...'; statusEl.style.color = '#E65100'; }
+        if (data.camera_connected) {
+            statusEl.textContent = '✅ ESP32-CAM Connected';
+            statusEl.style.color = '#2E7D32';
+        } else {
+            statusEl.textContent = '⚠️ Connecting to ESP32-CAM...';
+            statusEl.style.color = '#E65100';
+        }
 
         document.getElementById('cam-stream-url').textContent = data.stream_url || '—';
         document.getElementById('person-count').textContent   = data.person_count ?? 0;
         document.getElementById('avg-confidence').textContent = (data.avg_confidence ?? 0) + '%';
 
         const badge = document.getElementById('occupancy-badge');
-        if (data.occupied) { badge.textContent='🚨 OCCUPIED'; badge.style.backgroundColor='#F44336'; badge.style.color='white'; }
-        else                { badge.textContent='✅ VACANT';   badge.style.backgroundColor='#4CAF50'; badge.style.color='white'; }
+        if (data.occupied) {
+            badge.textContent            = '🚨 OCCUPIED';
+            badge.style.backgroundColor = '#F44336';
+            badge.style.color           = 'white';
+        } else {
+            badge.textContent            = '✅ VACANT';
+            badge.style.backgroundColor = '#4CAF50';
+            badge.style.color           = 'white';
+        }
 
-        if (data.person_count > 0 && data.person_count !== lastPersonCount) addDetectionLog(data.person_count, data.avg_confidence);
+        if (data.person_count > 0 && data.person_count !== lastPersonCount) {
+            addDetectionLog(data.person_count, data.avg_confidence);
+        }
         lastPersonCount = data.person_count;
         updateLastUpdateTime();
     }
 
+    // ── Detection log ─────────────────────────────────────────────────────────
     function addDetectionLog(count, confidence) {
-        detectionLog.unshift({ time: new Date().toLocaleTimeString(), count, confidence });
+        detectionLog.unshift({
+            time: new Date().toLocaleTimeString(),
+            count,
+            confidence,
+            threshold: currentThreshold
+        });
         if (detectionLog.length > 15) detectionLog = detectionLog.slice(0, 15);
         renderLog();
     }
 
     function renderLog() {
         const container = document.getElementById('detection-log');
-        if (!detectionLog.length) { container.innerHTML='<div class="text-center py-4" style="color:#616161">No detections yet</div>'; return; }
-        container.innerHTML = detectionLog.map(e => `
+        if (!detectionLog.length) {
+            container.innerHTML = '<div class="text-center py-4" style="color:#616161">No detections yet</div>';
+            return;
+        }
+        container.innerHTML = detectionLog.map(function (e) {
+            return `
             <div class="mb-2 p-2 rounded" style="background:rgba(0,0,0,.08);border-left:3px solid #FFD700;">
                 <div class="d-flex justify-content-between">
                     <span class="fw-bold" style="color:#212121;">${e.time}</span>
                     <span class="badge bg-danger">${e.count} person(s)</span>
                 </div>
-                <small style="color:#616161;">Confidence: ${e.confidence}%</small>
-            </div>`).join('');
+                <small style="color:#616161;">Confidence: ${e.confidence}% · Threshold was: ${e.threshold}%</small>
+            </div>`;
+        }).join('');
     }
 
     function updateLastUpdateTime() {
@@ -207,31 +292,59 @@
         if (el) el.innerHTML = `<strong>Last Update:</strong> ${new Date().toLocaleTimeString()}`;
     }
 
+    // ── Listeners ─────────────────────────────────────────────────────────────
     function setupListeners() {
-        document.getElementById('clear-log-btn').addEventListener('click', () => { detectionLog=[]; lastPersonCount=-1; renderLog(); });
+        document.getElementById('clear-log-btn').addEventListener('click', function () {
+            detectionLog = []; lastPersonCount = -1; renderLog();
+        });
 
-        document.getElementById('fullscreen-btn').addEventListener('click', () => {
+        document.getElementById('fullscreen-btn').addEventListener('click', function () {
             const c = document.getElementById('camera-feed-container');
-            !document.fullscreenElement ? c.requestFullscreen && c.requestFullscreen() : document.exitFullscreen && document.exitFullscreen();
+            if (!document.fullscreenElement) {
+                c.requestFullscreen && c.requestFullscreen();
+            } else {
+                document.exitFullscreen && document.exitFullscreen();
+            }
+        });
+
+        // Confidence slider — debounced so it doesn't spam the server
+        let sliderTimer = null;
+        document.getElementById('confidence-slider').addEventListener('input', function () {
+            const val = parseInt(this.value);
+            document.getElementById('threshold-display').textContent = val + '%';
+            clearTimeout(sliderTimer);
+            sliderTimer = setTimeout(function () { setThreshold(val); }, 400);
         });
 
         let detectionEnabled = true;
-        document.getElementById('detection-toggle-btn').addEventListener('click', () => {
+        document.getElementById('detection-toggle-btn').addEventListener('click', function () {
             detectionEnabled = !detectionEnabled;
-            const btn = document.getElementById('detection-toggle-btn');
-            fetch(`/api/camera/detection?enabled=${detectionEnabled}`).catch(()=>{});
-            btn.textContent = detectionEnabled ? '👁️ Detection: ON' : '🚫 Detection: OFF';
-            btn.style.backgroundColor = detectionEnabled ? '#000' : '#616161';
-            btn.style.color = detectionEnabled ? '#FFD700' : 'white';
+            fetch(`/api/camera/detection?enabled=${detectionEnabled}`).catch(function () {});
+            this.textContent           = detectionEnabled ? '👁️ Detection: ON' : '🚫 Detection: OFF';
+            this.style.backgroundColor = detectionEnabled ? '#000' : '#616161';
+            this.style.color           = detectionEnabled ? '#FFD700' : 'white';
         });
 
-        document.getElementById('esp32-test-btn').addEventListener('click', () => {
-            const btn = document.getElementById('esp32-test-btn');
-            btn.textContent='⏳ Testing...'; btn.disabled=true;
-            fetch('/api/camera/stats').then(r=>r.json())
-                .then(data=>{ btn.textContent=data.camera_connected?'✅ Connected!':'⚠️ Camera Offline'; btn.style.backgroundColor=data.camera_connected?'#4CAF50':'#FF9800'; })
-                .catch(()=>{ btn.textContent='❌ Server Error'; btn.style.backgroundColor='#F44336'; })
-                .finally(()=>setTimeout(()=>{ btn.textContent='📡 Test ESP32 Connection'; btn.style.backgroundColor='#2196F3'; btn.disabled=false; },3000));
+        document.getElementById('esp32-test-btn').addEventListener('click', function () {
+            const btn = this;
+            btn.textContent = '⏳ Testing…'; btn.disabled = true;
+            fetch('/api/camera/stats')
+                .then(r => r.json())
+                .then(function (data) {
+                    btn.textContent            = data.camera_connected ? '✅ Connected!' : '⚠️ Camera Offline';
+                    btn.style.backgroundColor = data.camera_connected ? '#4CAF50' : '#FF9800';
+                })
+                .catch(function () {
+                    btn.textContent = '❌ Server Error';
+                    btn.style.backgroundColor = '#F44336';
+                })
+                .finally(function () {
+                    setTimeout(function () {
+                        btn.textContent = '📡 Test ESP32 Connection';
+                        btn.style.backgroundColor = '#2196F3';
+                        btn.disabled = false;
+                    }, 3000);
+                });
         });
     }
 
@@ -239,5 +352,7 @@
         setTimeout(() => { this.src = '/video_feed?' + Date.now(); }, 3000);
     };
 
-    window.cameraTab = { cleanup: function () { if (statsInterval) clearInterval(statsInterval); } };
+    window.cameraTab = {
+        cleanup: function () { if (statsInterval) clearInterval(statsInterval); }
+    };
 </script>

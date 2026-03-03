@@ -242,24 +242,33 @@
         document.getElementById('tab1-date-picker').addEventListener('change', function () {
             const selected = this.value;
             const todayStr = new Date().toISOString().split('T')[0];
-
-            // Stop auto-refresh if user picks a historical date
             if (liveChartInterval) clearInterval(liveChartInterval);
-
             loadCSVChart(selected);
-
-            // Resume auto-refresh only if viewing today
             if (selected === todayStr) {
                 liveChartInterval = setInterval(function() { loadCSVChart(todayStr); }, 15000);
             }
         });
 
-        loadCSVChart(today);
+        // Load the most recent date that has data
+        fetch(`/api/energy/available-dates?room=${currentRoom}`)
+            .then(r => r.json())
+            .then(function(data) {
+                if (data.success && data.dates && data.dates.length > 0) {
+                    const todayStr = new Date().toISOString().split('T')[0];
+                    const past     = data.dates.filter(d => d <= todayStr);
+                    const best     = past.length ? past[past.length - 1] : data.dates[data.dates.length - 1];
+                    document.getElementById('tab1-date-picker').value = best;
+                    loadCSVChart(best);
+                } else {
+                    loadCSVChart(today);
+                }
+            })
+            .catch(function() { loadCSVChart(today); });
+
         fetchEnergyData();
         startLiveUpdates();
         startStatusUpdates();
 
-        // Auto-refresh chart every 15s while on today's date
         liveChartInterval = setInterval(function() {
             const todayStr = new Date().toISOString().split('T')[0];
             const picked   = document.getElementById('tab1-date-picker').value;
@@ -268,16 +277,14 @@
     });
 
     // ══════════════════════════════════════════════════════════
-    // CHART — auto-routes to DB (today) or CSV cache (historical)
+    // CHART — DB only, works for today and all historical dates
     // ══════════════════════════════════════════════════════════
     function loadCSVChart(dateStr) {
-        const today   = new Date().toISOString().split('T')[0];
-        const isToday = (dateStr === today || dateStr === '');
-        const url     = isToday
-            ? `/api/energy/live-chart?date=${today}`
-            : `/api/energy/csv-chart?date=${dateStr}`;
+        const today = new Date().toISOString().split('T')[0];
+        const date  = (dateStr && dateStr !== '') ? dateStr : today;
+        const url   = `/api/energy/chart?date=${date}&room=${currentRoom}`;
 
-        logData(`🔄 Loading chart for ${isToday ? 'today (live DB)' : dateStr + ' (CSV)'}…`);
+        logData(`🔄 Loading chart for ${date}…`);
 
         fetch(url)
             .then(function(r) { return r.json(); })
@@ -285,17 +292,14 @@
                 if (data.success) {
                     activeChartDate = data.date;
 
-                    // Update picker to match actual loaded date
-                    // (may differ from today if today has no CSV data yet)
                     if (data.date && parseInt(data.date.substring(0,4)) <= 2099) {
                         document.getElementById('tab1-date-picker').value = data.date;
                     }
 
                     updateChart(data.labels, data.power_data);
 
-                    const src = data.source === 'db' ? '🟢 Live DB' : '📁 CSV Cache';
                     document.getElementById('chart-header').textContent =
-                        `📈 Power (W) — ${data.date}  ${src}`;
+                        `📈 Power (W) — ${data.date}  🟢 Live DB`;
 
                     const s = data.summary;
                     document.getElementById('csv-avg').textContent    = s.avg_power;
@@ -304,15 +308,23 @@
                     document.getElementById('csv-pts').textContent    = s.data_points + ' readings';
                     document.getElementById('ov-csv-strip').style.display = 'block';
 
-                    logData(`✓ Chart: ${data.labels.length} buckets · ${src} · avg ${s.avg_power} W`);
+                    logData(`✓ ${data.labels.length} buckets · avg ${s.avg_power} W · ${s.data_points} readings`);
 
                 } else {
-                    // Today had no DB data yet — fall back to CSV most recent date
-                    if (isToday) {
-                        logData('ℹ No live data yet today — loading latest CSV date…');
-                        loadCSVChart('');   // CSV route returns latest available date
+                    // No data for this date — show message and suggest nearest available
+                    const available = data.available_dates || [];
+                    const past      = available.filter(d => d <= date);
+                    const nearest   = past.length ? past[past.length - 1] : (available.length ? available[0] : null);
+
+                    document.getElementById('chart-header').textContent = `📈 Power (W) — No data for ${date}`;
+                    updateChart([], []);   // clear the chart
+
+                    if (nearest) {
+                        logData(`ℹ No data for ${date}. Nearest available: ${nearest}`);
+                        // Offer the nearest date in the log
+                        logData(`💡 Try selecting ${nearest} from the date picker.`);
                     } else {
-                        logData('✗ No data: ' + (data.error || 'unknown'));
+                        logData(`ℹ No energy data in database yet.`);
                     }
                 }
             })

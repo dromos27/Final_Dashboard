@@ -38,21 +38,27 @@
         }
 
         /* Content column — fills remaining width, scrolls independently */
+        /* Content column — the scroll container; background lives HERE so it always fills the full scrollable area */
         .content-col {
             flex: 1;
             min-width: 0;
             height: 100vh;
             overflow-y: auto;
             overflow-x: hidden;
+            background-color: #f4f4f6;
+            transition: background-color 0.35s ease;
+        }
+        .content-col.night-mode {
+            background-color: #0f0f0f !important;
         }
 
-        /* Content area — the background canvas */
+        /* Content area — transparent; .content-col background shows through */
         .content-area {
             min-height: 100%;
             width: 100%;
             padding: 1.75rem 2rem;
-            background-color: #f4f4f6;
-            transition: background-color 0.35s ease, color 0.35s ease;
+            background-color: transparent;
+            transition: color 0.35s ease;
         }
 
         .tab-content, .tab-pane { width: 100%; }
@@ -252,14 +258,17 @@
     document.addEventListener('DOMContentLoaded', function () {
         const toggle      = document.getElementById('nightModeToggle');
         const contentArea = document.querySelector('.content-area');
+        const contentCol  = document.querySelector('.content-col');
 
         if (localStorage.getItem('nightMode') === 'enabled') {
             contentArea.classList.add('night-mode');
+            contentCol.classList.add('night-mode');
             toggle.textContent = '☀️ Day Mode';
         }
 
         toggle.addEventListener('click', function () {
             contentArea.classList.toggle('night-mode');
+            contentCol.classList.toggle('night-mode');
             const isNight = contentArea.classList.contains('night-mode');
             localStorage.setItem('nightMode', isNight ? 'enabled' : 'disabled');
             toggle.textContent = isNight ? '☀️ Day Mode' : '🌙 Night Mode';
