@@ -55,11 +55,8 @@ DETECTION_COOLDOWN   = 2
 
 
 # ============================================================================
-# YOLO MODEL
+# YOLO MODEL (skipped in cloud mode)
 # ============================================================================
-
-device = "cuda" if torch.cuda.is_available() else "cpu"
-print(f"[✓] Using device: {device}")
 
 yolo_model = None
 device = "cpu"
