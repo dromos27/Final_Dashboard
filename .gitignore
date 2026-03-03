@@ -1,4 +1,46 @@
-/.venv
-/.idea
-/__pycache__
-energy_dashboard.db
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+dist/
+build/
+*.egg
+
+# Virtual environments
+venv/
+.venv/
+env/
+
+# IDE / Editor
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Database (local development — regenerated on startup)
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+
+# ML model files (large — download or generate at build time)
+# Uncomment the lines below if you store models separately (e.g., Git LFS)
+# *.pt
+# *.joblib
+
+# Exports (generated at runtime)
+exports/*.csv
+
+# Environment variables
+.env
+.env.*
+!.env.example
+
+# Logs
+*.log

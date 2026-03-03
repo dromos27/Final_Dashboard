@@ -1,0 +1,25 @@
+# ============================================================================
+# render.yaml — Render Blueprint (Infrastructure as Code)
+# Docs: https://docs.render.com/blueprint-spec
+# ============================================================================
+services:
+  - type: web
+    name: energy-dashboard
+    runtime: python
+    plan: free                          # free | starter | standard | pro
+    buildCommand: ./render-build.sh
+    startCommand: gunicorn wsgi:app --bind 0.0.0.0:$PORT --workers 1 --threads 4 --timeout 120
+    envVars:
+      - key: PYTHON_VERSION
+        value: "3.11.9"
+      - key: FLASK_ENV
+        value: production
+      - key: ESP32_CAM_IP
+        value: ""                       # Set to your ESP32-CAM IP when on the same network
+      - key: ESP32_DEVICE_IP
+        value: ""                       # Set to your ESP32 device IP when on the same network
+    autoDeploy: true                    # Redeploy on every push to the linked branch
+    disk:
+      name: dashboard-data
+      mountPath: /data
+      sizeGB: 1                         # Persistent disk for SQLite DB + exports
