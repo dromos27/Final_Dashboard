@@ -1,0 +1,33 @@
+# ============================================================================
+# requirements-render.txt — Minimal dependencies for Render free-tier (512 MB)
+# Only includes what A1_Boot_Dash.py actually imports at runtime.
+# Heavy ML libs (pandas, sklearn, xgboost, scipy, statsmodels) are NOT needed —
+# the cloud app uses raw SQL for predictions and stdlib csv for data import.
+# ============================================================================
+
+# --- Core Flask ---
+blinker==1.9.0
+certifi==2025.11.12
+charset-normalizer==3.4.4
+click==8.3.1
+Flask==3.1.2
+gunicorn==23.0.0
+idna==3.11
+itsdangerous==2.2.0
+Jinja2==3.1.6
+MarkupSafe==3.0.3
+requests==2.32.5
+urllib3==2.5.0
+Werkzeug==3.1.4
+
+# --- Lightweight runtime deps ---
+numpy==2.2.6
+
+# --- Misc utilities ---
+python-dateutil==2.9.0.post0
+pytz==2025.2
+tzdata==2025.2
+six==1.17.0
+packaging==25.0
+setuptools==80.9.0
+typing_extensions==4.15.0
