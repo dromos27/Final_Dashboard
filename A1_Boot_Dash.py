@@ -4,7 +4,19 @@
 
 from flask import Flask, render_template, send_from_directory, jsonify, request, Response
 import os
-import cv2
+try:
+    import cv2
+    # Verify VideoCapture is present (missing in headless builds)
+    if not hasattr(cv2, 'VideoCapture'):
+        raise ImportError("opencv-python-headless detected — VideoCapture unavailable. "
+                          "Run: pip3 uninstall opencv-python-headless && pip3 install opencv-python")
+    CV2_AVAILABLE = True
+    print("[✓] OpenCV loaded with VideoCapture support")
+except ImportError as _cv2_err:
+    print(f"[!] OpenCV not available: {_cv2_err}")
+    print("[!] Camera features disabled — dashboard will still run")
+    CV2_AVAILABLE = False
+    cv2 = None
 import torch
 import time
 import numpy as np
@@ -25,8 +37,21 @@ import requests
 current_dir = os.path.dirname(os.path.abspath(__file__))
 parent_dir  = os.path.dirname(current_dir)
 sys.path.insert(0, parent_dir)
+sys.path.insert(0, current_dir)   # so PA3/PA4 imports resolve from project root
 
 app = Flask(__name__)
+
+# ============================================================================
+# PA3 ENERGY PREDICTOR — loaded once at startup
+# ============================================================================
+
+energy_predictor = None
+try:
+    from PA3_energy_predictor import EnergyPredictor
+    energy_predictor = EnergyPredictor(assets_dir=os.path.join(current_dir, 'assets'))
+    print("[✓] EnergyPredictor (PA3) loaded — using joblib models")
+except Exception as _pa3_err:
+    print(f"[!] EnergyPredictor not available: {_pa3_err} — predictions will fall back to DB-only")
 
 # ============================================================================
 # ESP32 CONFIGURATION
@@ -36,6 +61,8 @@ ESP32_CAM_IP         = "172.20.10.5"
 ESP32_CAM_STREAM_URL = f"http://{ESP32_CAM_IP}/stream"
 ESP32_DEVICE_IP      = "172.20.10.4"
 ESP32_DEVICE_BASE_URL = f"http://{ESP32_DEVICE_IP}/"
+ESP32_MONITOR_IP       = "172.20.10.6"
+ESP32_MONITOR_BASE_URL = f"http://{ESP32_MONITOR_IP}/"
 DETECTION_COOLDOWN   = 2
 
 
@@ -105,13 +132,13 @@ def init_db():
     print(f"[✓] Database initialized: {DB_PATH}")
 
 
-def db_log_energy(room, voltage, current, power, energy_kwh, light_state="OFF"):
+def db_log_energy(room, voltage, current, power, energy_kwh, light_state="OFF", dt=None):
     try:
+        ts = (dt or datetime.now()).strftime("%Y-%m-%d %H:%M:%S")
         conn = sqlite3.connect(DB_PATH)
         conn.execute(
             "INSERT INTO energy_log (timestamp,room,voltage,current,power,energy_kwh,light_state) VALUES (?,?,?,?,?,?,?)",
-            (datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-             room, round(voltage, 4), round(current, 6), round(power, 4), round(energy_kwh, 8), light_state)
+            (ts, room, round(voltage, 4), round(current, 6), round(power, 4), round(energy_kwh, 8), light_state)
         )
         conn.commit()
         conn.close()
@@ -223,23 +250,18 @@ def import_csv_to_db():
 
     print(f"[CSV→DB] Starting import from {csv_path}…")
     try:
-        # ── Parse CSV ────────────────────────────────────────────────────────
         df = pd.read_csv(csv_path, encoding='utf-8-sig', dtype=str)
         df.columns = [c.strip().lstrip('\ufeff') for c in df.columns]
         print(f"[CSV→DB] Read {len(df)} rows, columns: {list(df.columns)}")
-
         print(f"[CSV→DB] Date sample: {df['Date'].head(5).tolist()}")
 
-        # Drop rows with empty/null Date or Time
         df = df.dropna(subset=['Date', 'Time'])
         df = df[df['Date'].str.strip() != '']
         df = df[df['Time'].str.strip() != '']
         print(f"[CSV→DB] Rows with valid Date+Time: {len(df)}")
 
-        # Parse datetime — Date is YYYY-MM-DD, Time is h:MM:SS AM/PM
         dt_str = df['Date'].str.strip() + ' ' + df['Time'].str.strip()
         df['_dt'] = pd.to_datetime(dt_str, format='%Y-%m-%d %I:%M:%S %p', errors='coerce')
-        # Fallback for 24-hour time format
         mask = df['_dt'].isna()
         if mask.any():
             df.loc[mask, '_dt'] = pd.to_datetime(
@@ -249,16 +271,13 @@ def import_csv_to_db():
         print(f"[CSV→DB] Datetime parse: {len(df) - nat_count} ok, {nat_count} failed")
         df = df.dropna(subset=['_dt'])
 
-        # Filter out garbage years — only keep realistic dates (2020–2030)
         df = df[df['_dt'].dt.year.between(2020, 2030)].copy()
         df = df.dropna(subset=['_dt'])
         df = df[df['_dt'].dt.year.between(2000, 2099)].copy()
 
-        # Numeric columns
         for col in ['Voltage(V)', 'Current(A)', 'Power(W)', 'Energy(kWh)']:
             df[col] = pd.to_numeric(df.get(col, 0), errors='coerce').fillna(0)
 
-        # Build final DataFrame matching energy_log schema
         import_df = pd.DataFrame({
             'timestamp':   df['_dt'].dt.strftime('%Y-%m-%d %H:%M:%S'),
             'room':        '705',
@@ -271,10 +290,7 @@ def import_csv_to_db():
         print(f"[CSV→DB] Parsed {len(import_df)} valid rows spanning "
               f"{import_df['timestamp'].min()} → {import_df['timestamp'].max()}")
 
-        # ── Insert into DB ───────────────────────────────────────────────────
         conn = sqlite3.connect(DB_PATH)
-
-        # Purge any previously imported rows with bad years
         purged = conn.execute(
             "DELETE FROM energy_log WHERE room='705' AND (CAST(strftime('%Y', timestamp) AS INTEGER) < 2020 OR CAST(strftime('%Y', timestamp) AS INTEGER) > 2030)"
         ).rowcount
@@ -285,14 +301,12 @@ def import_csv_to_db():
         before = conn.execute("SELECT COUNT(*) FROM energy_log WHERE room='705'").fetchone()[0]
         print(f"[CSV→DB] DB currently has {before} rows for room 705")
 
-        # Ensure unique index exists so INSERT OR IGNORE works
         conn.execute("""
             CREATE UNIQUE INDEX IF NOT EXISTS idx_energy_ts_room
             ON energy_log(timestamp, room)
         """)
         conn.commit()
 
-        # Write CSV rows to a temp table, then INSERT OR IGNORE into energy_log
         import_df.to_sql('_csv_import_tmp', conn, if_exists='replace', index=False)
         conn.execute("""
             INSERT OR IGNORE INTO energy_log
@@ -307,12 +321,11 @@ def import_csv_to_db():
         conn.close()
 
         added = after - before
-        print(f"[CSV→DB] ✅ Import done — {added} new rows added ({after} total in DB)")
+        print(f"[CSV→DB] Import done — {added} new rows added ({after} total in DB)")
 
     except Exception as e:
-        print(f"[CSV→DB] ❌ Error: {e}")
+        print(f"[CSV→DB] Error: {e}")
         import traceback; traceback.print_exc()
-
 
 
 # ============================================================================
@@ -325,7 +338,7 @@ def load_schedule_by_day(room, day_name):
         schedule_file = os.path.join(current_dir, 'assets', 'room_schedules.csv')
 
         if not os.path.exists(schedule_file):
-            print(f"[SCHEDULE] ❌ File not found: {schedule_file}")
+            print(f"[SCHEDULE] File not found: {schedule_file}")
             return []
 
         schedule_data = []
@@ -345,7 +358,7 @@ def load_schedule_by_day(room, day_name):
         return schedule_data
 
     except Exception as e:
-        print(f"[SCHEDULE] ❌ Error: {e}")
+        print(f"[SCHEDULE] Error: {e}")
         import traceback; traceback.print_exc()
         return []
 
@@ -369,24 +382,33 @@ esp32_status = {
 }
 esp32_lock = Lock()
 
-# Rolling history arrays (last 60 readings) for sparkline charts
+monitor_status = {
+    "wifi":        "Unknown",
+    "sd_card":     "Unknown",
+    "ntp":         "Unknown",
+    "voltage":     0.0,
+    "current":     0.0,
+    "power":       0.0,
+    "energy_kwh":  0.0,
+    "uptime":      0,
+    "last_update": "Never",
+    "error":       None,
+}
+monitor_lock = Lock()
+
 power_history   = []
 voltage_history = []
 current_history = []
 MAX_HISTORY     = 60
 
 detection_enabled = True
-PERSON_CONFIDENCE_THRESHOLD = 0.70   # detections below this % are ignored (not counted, don't trigger lights)
+PERSON_CONFIDENCE_THRESHOLD = 0.70
+
 
 # ============================================================================
 # ESP32 POLLING THREAD
 # ============================================================================
-
-def parse_esp32_response(text: str) -> dict:
-    """
-    Parse the plain-text /info response from the ESP32.
-    Extracts all numeric fields, status flags, and the ESP32's own NTP timestamp.
-    """
+def parse_monitor_response(text: str) -> dict:
     data = {}
     patterns = {
         "voltage":    r"Voltage:\s*([\d.]+)\s*V",
@@ -400,13 +422,33 @@ def parse_esp32_response(text: str) -> dict:
         if m:
             data[key] = float(m.group(1))
 
-    data["light_state"] = "ON"  if "Light: ON"          in text else "OFF"
+    data["wifi"]    = "Connected"    if "WiFi: Connected"  in text else "Disconnected"
+    data["sd_card"] = "OK"           if "SD Card: OK"      in text else \
+                      "Failed"       if "SD Card: Failed"  in text else "Unknown"
+    data["ntp"]     = "Synchronized" if "NTP: Synchronized" in text else \
+                      "Backup"       if "NTP: Backup"       in text else "None"
+    return data
+
+def parse_esp32_response(text: str) -> dict:
+    data = {}
+    patterns = {
+        "voltage":    r"Voltage:\s*([\d.]+)\s*V",
+        "current":    r"Current:\s*([\d.]+)\s*A",
+        "power":      r"Power:\s*([\d.]+)\s*W",
+        "energy_kwh": r"Energy:\s*([\d.]+)\s*kWh",
+        "uptime":     r"Uptime:\s*(\d+)\s*seconds",
+    }
+    for key, pattern in patterns.items():
+        m = re.search(pattern, text, re.IGNORECASE)
+        if m:
+            data[key] = float(m.group(1))
+
+    data["light_state"] = "ON"      if "Light: ON"          in text else "OFF"
     data["wifi"]        = "Connected"    if "WiFi: Connected"  in text else "Disconnected"
     data["cloud"]       = "Connected"    if "Cloud: Connected" in text else "Disconnected"
-    data["sd_card"]     = "OK"    if "SD Card: OK"     in text else \
-                          "Failed" if "SD Card: Failed" in text else "Unknown"
+    data["sd_card"]     = "OK"      if "SD Card: OK"     in text else \
+                          "Failed"  if "SD Card: Failed" in text else "Unknown"
 
-    # Pull the ESP32's own NTP-synced timestamp — format: "Time: MM/DD/YYYY HH:MM:SS"
     m = re.search(r"Time:\s*(\d{2}/\d{2}/\d{4}\s+\d{2}:\d{2}:\d{2})", text)
     if m:
         data["ph_time"] = m.group(1)
@@ -415,10 +457,6 @@ def parse_esp32_response(text: str) -> dict:
 
 
 def _esp32_dt(parsed: dict) -> datetime:
-    """
-    Return a datetime from the ESP32's NTP-synced ph_time field.
-    Falls back to datetime.now() if ph_time is absent or unparseable.
-    """
     ph = parsed.get("ph_time", "")
     if ph:
         for fmt in ("%m/%d/%Y %H:%M:%S", "%m/%d/%Y %I:%M:%S %p"):
@@ -428,6 +466,22 @@ def _esp32_dt(parsed: dict) -> datetime:
                 continue
     return datetime.now()
 
+def poll_esp32_monitor():
+    """Polls the V9 monitoring-only ESP32 every second."""
+    while True:
+        try:
+            resp = requests.get(f"{ESP32_MONITOR_BASE_URL}info", timeout=3)
+            if resp.status_code == 200:
+                parsed = parse_monitor_response(resp.text)
+                with monitor_lock:
+                    monitor_status.update(parsed)
+                    monitor_status["error"]       = None
+                    monitor_status["last_update"] = time.strftime("%H:%M:%S")
+        except requests.exceptions.RequestException as e:
+            with monitor_lock:
+                monitor_status["error"]       = str(e)
+                monitor_status["last_update"] = time.strftime("%H:%M:%S")
+        time.sleep(1)
 
 def poll_esp32_device():
     global esp32_status, power_history, voltage_history, current_history
@@ -437,16 +491,12 @@ def poll_esp32_device():
             resp = requests.get(f"{ESP32_DEVICE_BASE_URL}info", timeout=3)
             if resp.status_code == 200:
                 parsed = parse_esp32_response(resp.text)
-
-                # Use the ESP32's own NTP clock for the timestamp
                 dt = _esp32_dt(parsed)
 
                 with esp32_lock:
                     esp32_status.update(parsed)
                     esp32_status["error"]       = None
                     esp32_status["last_update"] = dt.strftime("%H:%M:%S")
-
-                    # Maintain rolling history for charts
                     power_history.append(parsed.get("power", 0))
                     voltage_history.append(parsed.get("voltage", 0))
                     current_history.append(parsed.get("current", 0))
@@ -454,14 +504,13 @@ def poll_esp32_device():
                     if len(voltage_history) > MAX_HISTORY: voltage_history.pop(0)
                     if len(current_history) > MAX_HISTORY: current_history.pop(0)
 
-                # 1. Save to SQLite
                 db_log_energy("705",
                               parsed.get("voltage",    0),
                               parsed.get("current",    0),
                               parsed.get("power",      0),
                               parsed.get("energy_kwh", 0),
-                              parsed.get("light_state","OFF"))
-
+                              parsed.get("light_state","OFF"),
+                              dt)
 
                 prune_counter += 1
                 if prune_counter % 10 == 0:
@@ -483,14 +532,12 @@ def poll_esp32_device():
 # LIGHTS AUTOMATION
 # ============================================================================
 
-# How long (seconds) after the last person detection before lights turn off
 PERSON_GONE_TIMEOUT = 300  # 5 minutes
 
-# Shared state for the auto-light controller
-_last_person_time  = 0.0   # epoch time of last person detection
-_auto_light_lock   = Lock()
-auto_light_status  = {
-    "mode":      "SCHEDULE",   # SCHEDULE | PERSON | OFF
+_last_person_time = 0.0
+_auto_light_lock  = Lock()
+auto_light_status = {
+    "mode":      "OFF",
     "event":     "Starting…",
     "countdown": 0,
 }
@@ -516,30 +563,38 @@ def _is_during_scheduled_event():
 def _turn_lights_on(reason: str):
     try:
         requests.get(f"{ESP32_DEVICE_BASE_URL}person", timeout=1)
-        print(f"[LIGHTS] 💡 ON  — {reason}")
+        print(f"[LIGHTS] ON  — {reason}")
     except Exception as e:
         print(f"[LIGHTS] Error turning ON: {e}")
 
 
 def _turn_lights_off(reason: str):
+    # Uses /off endpoint — dedicated OFF, never risks toggling ON accidentally
     try:
-        requests.get(f"{ESP32_DEVICE_BASE_URL}toggle", timeout=1)
-        print(f"[LIGHTS] 🔴 OFF — {reason}")
+        requests.get(f"{ESP32_DEVICE_BASE_URL}off", timeout=1)
+        print(f"[LIGHTS] OFF — {reason}")
     except Exception as e:
         print(f"[LIGHTS] Error turning OFF: {e}")
 
 
 def auto_light_controller():
     """
-    Runs every 0.5s. Priority order:
-      1. SCHEDULE — if a class is active, lights ON regardless of camera.
-      2. PERSON   — if a person was detected recently (within PERSON_GONE_TIMEOUT), lights ON.
-      3. OFF      — no schedule + no recent person → lights OFF.
+    Runs every 0.5s.
+
+    Behaviour:
+      - Schedule start  → lights ON immediately (pre-emptive)
+      - During class    → person detection governs OFF via 5-min timeout
+      - Outside class   → person detection governs ON/OFF via 5-min timeout
+      - No class + no person for 5 min → lights OFF
+
+    The schedule only fires the initial ON at class start time.
+    After that, presence detection is always in control of turning lights off.
     """
     global _last_person_time
 
-    _prev_light_on    = False   # tracks last commanded state to avoid spamming ESP32
-    _prev_person_seen = False   # for edge-detection (person appeared / person left)
+    _prev_light_on     = False
+    _prev_person_seen  = False
+    _prev_during_class = False   # detects the OFF→ON edge when a class starts
 
     print("[AUTO-LIGHT] Controller started")
 
@@ -549,41 +604,38 @@ def auto_light_controller():
         now        = time.time()
         person_now = person_count_global > 0
 
-        # ── Edge detection: log person appeared / left ────────────────────
-        if person_now and not _prev_person_seen:
-            print("[AUTO-LIGHT] 👤 Person detected")
-        elif not person_now and _prev_person_seen:
-            print(f"[AUTO-LIGHT] 🚶 Person left — waiting {PERSON_GONE_TIMEOUT}s before OFF")
-        _prev_person_seen = person_now
-
-        # ── Update last-seen timestamp ────────────────────────────────────
+        # Update last-seen timestamp
         if person_now:
             with _auto_light_lock:
                 _last_person_time = now
 
-        # ── Decide what to do ─────────────────────────────────────────────
-        during_class, event_name = _is_during_scheduled_event()
         with _auto_light_lock:
             last_seen = _last_person_time
 
+        during_class, event_name = _is_during_scheduled_event()
+
+        # ── Schedule edge: class just started → pre-emptive ON ────────────
+        if during_class and not _prev_during_class:
+            print(f"[AUTO-LIGHT] Schedule started: '{event_name}' — lights ON")
+            _turn_lights_on(f"schedule start: {event_name}")
+            _prev_light_on = True
+        _prev_during_class = during_class
+
+        # ── Person edge logging ───────────────────────────────────────────
+        if person_now and not _prev_person_seen:
+            print("[AUTO-LIGHT] Person detected — lights ON")
+        elif not person_now and _prev_person_seen:
+            print(f"[AUTO-LIGHT] Person left — OFF in {PERSON_GONE_TIMEOUT}s if no return")
+        _prev_person_seen = person_now
+
+        # ── Derived timing state ──────────────────────────────────────────
         person_recently = (now - last_seen) < PERSON_GONE_TIMEOUT if last_seen > 0 else False
         gone_for        = now - last_seen if last_seen > 0 else 0
         countdown       = max(0, PERSON_GONE_TIMEOUT - gone_for) if not person_now and last_seen > 0 else 0
 
-        if during_class:
-            # ── Priority 1: Always ON during a scheduled class ────────────
-            with _auto_light_lock:
-                auto_light_status.update({
-                    "mode":      "SCHEDULE",
-                    "event":     f"Class: {event_name}",
-                    "countdown": 0,
-                })
-            if not _prev_light_on:
-                _turn_lights_on(f"scheduled class '{event_name}'")
-                _prev_light_on = True
-
-        elif person_recently or person_now:
-            # ── Priority 2: Person detected (or just left, within timeout) ─
+        # ── Decision ─────────────────────────────────────────────────────
+        if person_now or person_recently:
+            # Person present or just left within timeout
             with _auto_light_lock:
                 auto_light_status.update({
                     "mode":      "PERSON",
@@ -591,11 +643,25 @@ def auto_light_controller():
                     "countdown": int(countdown),
                 })
             if not _prev_light_on:
-                _turn_lights_on("person present")
+                _turn_lights_on("person detected")
+                _prev_light_on = True
+
+        elif during_class:
+            # Class active but nobody present yet (or nobody returned after timeout)
+            # Lights are already ON from schedule edge — just keep status updated.
+            # If lights were somehow turned off manually, restore them.
+            with _auto_light_lock:
+                auto_light_status.update({
+                    "mode":      "SCHEDULE",
+                    "event":     f"Class: {event_name} — awaiting occupant",
+                    "countdown": 0,
+                })
+            if not _prev_light_on:
+                _turn_lights_on(f"class active: {event_name}")
                 _prev_light_on = True
 
         else:
-            # ── Priority 3: No class + no person → OFF ────────────────────
+            # No person + no class → OFF
             with _auto_light_lock:
                 auto_light_status.update({
                     "mode":      "OFF",
@@ -603,16 +669,16 @@ def auto_light_controller():
                     "countdown": 0,
                 })
             if _prev_light_on:
-                _turn_lights_off("no class and no person detected")
+                _turn_lights_off("no person and no active class")
                 _prev_light_on = False
 
 
 def lights_automation_loop():
-    """Legacy 60-second schedule checker — kept as a safety net fallback."""
+    """5-minute schedule checker — safety net fallback."""
     print("[✓] Schedule fallback loop started")
     while True:
         try:
-            time.sleep(300)   # every 5 minutes as a safety net
+            time.sleep(300)
             during_class, event_name = _is_during_scheduled_event()
             if during_class:
                 print(f"[LIGHTS-FALLBACK] Ensuring ON for '{event_name}'")
@@ -628,6 +694,13 @@ def lights_automation_loop():
 
 def camera_loop():
     global shared_frame, person_count_global, avg_confidence_global, camera_connected, last_notification_time
+
+    if not CV2_AVAILABLE:
+        print("[CAMERA] Disabled — OpenCV not available (headless build or not installed)")
+        print("[CAMERA] Fix: pip3 uninstall opencv-python-headless && pip3 install opencv-python")
+        camera_connected = False
+        return
+
     print(f"[CAMERA] Connecting to: {ESP32_CAM_STREAM_URL}")
     while True:
         cap = None
@@ -658,24 +731,22 @@ def camera_loop():
                             cls  = int(box.cls[0])
                             conf = float(box.conf[0])
                             if cls != 0:
-                                continue   # not a person class
+                                continue
                             x1, y1, x2, y2 = map(int, box.xyxy[0])
                             x1 = int(x1 * w / 640); y1 = int(y1 * h / 480)
                             x2 = int(x2 * w / 640); y2 = int(y2 * h / 480)
                             if conf < PERSON_CONFIDENCE_THRESHOLD:
-                                # Draw grey box — detected but below threshold, ignored
                                 cv2.rectangle(frame, (x1,y1),(x2,y2),(128,128,128),2)
                                 cv2.putText(frame, f"? {int(conf*100)}% (ignored)",
                                             (x1,y1-10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (128,128,128), 1)
-                                continue   # does NOT count as a person
-                            # Passes threshold — count it
+                                continue
                             persons += 1
                             confidences.append(conf)
                             cv2.rectangle(frame, (x1,y1),(x2,y2),(0,215,255),3)
                             cv2.putText(frame, f"Person {int(conf*100)}%",
                                         (x1,y1-10), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0,215,255), 2)
-                person_count_global    = persons
-                avg_confidence_global  = int(sum(confidences)/len(confidences)*100) if confidences else 0
+                person_count_global   = persons
+                avg_confidence_global = int(sum(confidences)/len(confidences)*100) if confidences else 0
                 status_text = f"Persons: {persons} | {'OCCUPIED' if persons>0 else 'VACANT'} | Min conf: {int(PERSON_CONFIDENCE_THRESHOLD*100)}%"
                 color = (0,255,0) if persons == 0 else (0,0,255)
                 cv2.putText(frame, status_text, (10,30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, color, 2)
@@ -702,6 +773,11 @@ def camera_loop():
 # ============================================================================
 # FLASK ROUTES — PAGES
 # ============================================================================
+@app.route('/api/monitor/status')
+def get_monitor_status():
+    with monitor_lock:
+        status = dict(monitor_status)
+    return jsonify(status)
 
 @app.route('/')
 def dashboard():
@@ -743,12 +819,12 @@ def video_feed():
 @app.route('/api/camera/stats')
 def camera_stats():
     return jsonify({
-        'person_count':               person_count_global,
-        'avg_confidence':             avg_confidence_global,
-        'occupied':                   person_count_global > 0,
-        'camera_connected':           camera_connected,
-        'confidence_threshold':       int(PERSON_CONFIDENCE_THRESHOLD * 100),
-        'timestamp':                  datetime.now().isoformat()
+        'person_count':         person_count_global,
+        'avg_confidence':       avg_confidence_global,
+        'occupied':             person_count_global > 0,
+        'camera_connected':     camera_connected,
+        'confidence_threshold': int(PERSON_CONFIDENCE_THRESHOLD * 100),
+        'timestamp':            datetime.now().isoformat()
     })
 
 
@@ -786,10 +862,10 @@ def get_latest_energy():
     if reading:
         return jsonify({
             'success': True, 'room': room,
-            'voltage':    round(reading.get('voltage',    0), 2),
-            'current':    round(reading.get('current',    0), 6),
-            'power':      round(reading.get('power',      0), 2),
-            'energy_kwh': round(reading.get('energy_kwh', 0), 3),
+            'voltage':     round(reading.get('voltage',    0), 2),
+            'current':     round(reading.get('current',    0), 6),
+            'power':       round(reading.get('power',      0), 2),
+            'energy_kwh':  round(reading.get('energy_kwh', 0), 3),
             'light_state': reading.get('light_state', 'OFF'),
             'timestamp':   reading.get('timestamp', ''),
         })
@@ -827,7 +903,6 @@ def export_energy_csv():
     return jsonify({'success': False, 'error': 'No data to export'}), 404
 
 
-
 # ============================================================================
 # ENERGY CHART + PREDICTIONS (DB only)
 # ============================================================================
@@ -835,10 +910,6 @@ def export_energy_csv():
 @app.route('/api/energy/chart')
 @app.route('/api/energy/live-chart')
 def energy_chart():
-    """
-    15-minute bucketed power chart from SQLite for any date.
-    Works for today (live) and historical dates equally.
-    """
     date_param = request.args.get('date', datetime.now().strftime('%Y-%m-%d')).strip()
     room       = request.args.get('room', '705')
 
@@ -860,7 +931,6 @@ def energy_chart():
         return jsonify({'success': False, 'error': str(e)}), 500
 
     if not rows:
-        # No data for this date — tell the frontend which dates are available
         try:
             conn = sqlite3.connect(DB_PATH)
             date_rows = conn.execute(
@@ -882,7 +952,6 @@ def energy_chart():
 
 
 def energy_chart_for_date(date_str, room, rows=None):
-    """Build chart JSON for a given date. Fetches rows from DB if not provided."""
     if rows is None:
         day_start = f"{date_str} 00:00:00"
         day_end   = f"{date_str} 23:59:59"
@@ -939,7 +1008,6 @@ def energy_chart_for_date(date_str, room, rows=None):
 
 @app.route('/api/energy/available-dates')
 def available_dates():
-    """Return all dates that have data in the DB, for the date picker."""
     room = request.args.get('room', '705')
     try:
         conn = sqlite3.connect(DB_PATH)
@@ -955,10 +1023,6 @@ def available_dates():
 
 @app.route('/api/predict-energy')
 def predict_energy():
-    """
-    Predict hourly energy for a target date using historical DB data.
-    Groups by day-of-week. If that weekday historically shows ~0W, returns zeros.
-    """
     date_param = request.args.get('date', '').strip()
     room_param = request.args.get('room', '705')
 
@@ -973,12 +1037,82 @@ def predict_energy():
     target_weekday = target_dt.weekday()
     dow_labels     = ['Monday','Tuesday','Wednesday','Thursday','Friday','Saturday','Sunday']
 
-    # Pull all historical rows from DB grouped by weekday
+    db_same_dow_count = 0
+    db_total_count    = 0
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        db_total_count = conn.execute(
+            "SELECT COUNT(*) FROM energy_log WHERE room=?", (room_param,)
+        ).fetchone()[0]
+        db_same_dow_count = conn.execute(
+            """SELECT COUNT(*) FROM energy_log
+               WHERE room=? AND strftime('%w', timestamp) = ?""",
+            (room_param, str((target_weekday + 1) % 7))
+        ).fetchone()[0]
+        conn.close()
+    except Exception:
+        pass
+
+    confidence = min(95, 50 + db_same_dow_count // 10)
+
+    try:
+        conn2 = sqlite3.connect(DB_PATH)
+        same_dow_days = conn2.execute(
+            """SELECT COUNT(DISTINCT DATE(timestamp)) FROM energy_log
+               WHERE room=? AND strftime('%w', timestamp) = ?""",
+            (room_param, str((target_weekday + 1) % 7))
+        ).fetchone()[0]
+        conn2.close()
+    except Exception:
+        same_dow_days = 0
+
+    if same_dow_days == 0:
+        confidence = 30
+    elif same_dow_days < 4:
+        confidence = 50
+    elif same_dow_days < 7:
+        confidence = 65
+    elif same_dow_days < 14:
+        confidence = 75
+    elif same_dow_days < 30:
+        confidence = 85
+    else:
+        confidence = 92
+
+    if energy_predictor is not None:
+        try:
+            result = energy_predictor.predict(
+                target_dt.year, target_dt.month, target_dt.day, room_param
+            )
+            is_zero    = result.get('is_weekend', False) and result['total_daily_kWh'] == 0.0
+            hourly_kwh = result.get('hourly_breakdown', [0.0] * 24)
+            hourly_w   = [round(k * 1000, 2) for k in hourly_kwh]
+            return jsonify({
+                'success':              True,
+                'date':                 date_param,
+                'day_of_week':          result.get('day_name', dow_labels[target_weekday]),
+                'room':                 room_param,
+                'room_type':            result.get('room_type', 'Laboratory' if room_param.startswith('7') else 'Office/Classroom'),
+                'is_zero_day':          is_zero,
+                'total_daily_kWh':      result.get('total_daily_kWh', 0.0),
+                'predicted_rate':       result.get('predicted_rate', 11.0),
+                'total_cost_Php':       result.get('total_cost_Php', 0.0),
+                'avg_hourly_kWh':       result.get('avg_hourly_kWh', 0.0),
+                'avg_hourly_cost_Php':  result.get('avg_hourly_cost_Php', 0.0),
+                'hourly_breakdown':     hourly_kwh,
+                'hourly_power_w':       hourly_w,
+                'confidence':           confidence,
+                'confidence_basis':     f"{same_dow_days} {dow_labels[target_weekday]}s in DB",
+                'recommendations':      result.get('recommendations', []),
+                'data_source':          'PA3 EnergyPredictor (kwh_predictor.joblib + rate_forecaster.joblib)',
+                'historical_rows_used': db_total_count,
+            })
+        except Exception as pa3_err:
+            print(f"[PREDICT] PA3 error: {pa3_err} — falling back to DB")
+
     try:
         conn = sqlite3.connect(DB_PATH)
         conn.row_factory = sqlite3.Row
-
-        # All rows for this room
         all_rows = conn.execute(
             "SELECT timestamp, power, energy_kwh FROM energy_log WHERE room=? ORDER BY timestamp ASC",
             (room_param,)
@@ -990,7 +1124,6 @@ def predict_energy():
     if not all_rows:
         return jsonify({'error': 'No historical data in database yet'}), 404
 
-    # Parse timestamps and group by weekday
     parsed_rows = []
     for r in all_rows:
         try:
@@ -1000,103 +1133,71 @@ def predict_energy():
             continue
 
     same_dow_rows = [r for r in parsed_rows if r['dt'].weekday() == target_weekday]
-
-    # Zero-day check: if this weekday averages below 5W historically → predict 0
-    ZERO_THRESHOLD_W = 5.0
     dow_avg_power = (sum(r['power'] for r in same_dow_rows) / len(same_dow_rows)) if same_dow_rows else 0.0
-    is_zero_day   = dow_avg_power < ZERO_THRESHOLD_W
-
-    print(f"[PREDICT] {dow_labels[target_weekday]} | DB rows: {len(same_dow_rows)} | avg: {dow_avg_power:.2f}W | zero: {is_zero_day}")
+    is_zero_day   = dow_avg_power < 5.0
 
     if is_zero_day:
         return jsonify({
-            'success':              True,
-            'date':                 date_param,
-            'day_of_week':          dow_labels[target_weekday],
-            'room':                 room_param,
-            'room_type':            'Laboratory' if room_param.startswith('7') else 'Office/Classroom',
-            'is_zero_day':          True,
-            'total_daily_kWh':      0.0,
-            'predicted_rate':       11.0,
-            'total_cost_Php':       0.0,
-            'avg_hourly_kWh':       0.0,
-            'avg_hourly_cost_Php':  0.0,
-            'hourly_breakdown':     [0.0] * 24,
-            'hourly_power_w':       [0.0] * 24,
-            'confidence':           95,
-            'recommendations':      [
-                f"{dow_labels[target_weekday]}s show no energy consumption in historical data.",
-                "No classes or activities are scheduled on this day of the week.",
-                "Predicted consumption: 0 kWh."
-            ],
-            'data_source':          'energy_dashboard.db',
-            'historical_rows_used': len(parsed_rows),
+            'success': True, 'date': date_param,
+            'day_of_week': dow_labels[target_weekday], 'room': room_param,
+            'room_type': 'Laboratory' if room_param.startswith('7') else 'Office/Classroom',
+            'is_zero_day': True, 'total_daily_kWh': 0.0, 'predicted_rate': 11.0,
+            'total_cost_Php': 0.0, 'avg_hourly_kWh': 0.0, 'avg_hourly_cost_Php': 0.0,
+            'hourly_breakdown': [0.0]*24, 'hourly_power_w': [0.0]*24,
+            'confidence': confidence,
+            'confidence_basis': f"{same_dow_days} {dow_labels[target_weekday]}s in DB",
+            'recommendations': [f"{dow_labels[target_weekday]}s show no energy consumption in historical data."],
+            'data_source': 'energy_dashboard.db (fallback)', 'historical_rows_used': len(parsed_rows),
         })
 
-    # Build hourly averages — weight same-weekday rows 2x
     hourly_power = defaultdict(list)
     for r in parsed_rows:
-        weight = 2 if r['dt'].weekday() == target_weekday else 1
-        for _ in range(weight):
+        w = 2 if r['dt'].weekday() == target_weekday else 1
+        for _ in range(w):
             hourly_power[r['dt'].hour].append(r['power'])
 
-    hourly_avg_w = []
-    for h in range(24):
-        vals = hourly_power.get(h, [])
-        avg  = (sum(vals) / len(vals)) if vals else dow_avg_power
-        hourly_avg_w.append(round(avg, 2))
+    hourly_avg_w = [round((sum(hourly_power[h])/len(hourly_power[h])) if hourly_power.get(h) else dow_avg_power, 2) for h in range(24)]
+    hourly_kwh   = [round(w / 1000, 4) for w in hourly_avg_w]
+    total_kwh    = round(sum(hourly_kwh), 4)
+    rate         = 11.0
+    total_cost   = round(total_kwh * rate, 2)
+    peak_hour    = hourly_avg_w.index(max(hourly_avg_w))
+    peak_power   = max(hourly_avg_w)
 
-    hourly_kwh = [round(w / 1000, 4) for w in hourly_avg_w]
-    total_kwh  = round(sum(hourly_kwh), 4)
-    rate       = 11.0
-    total_cost = round(total_kwh * rate, 2)
-    confidence = min(95, 60 + len(same_dow_rows) // 10)
-
-    recommendations = []
-    peak_hour  = hourly_avg_w.index(max(hourly_avg_w))
-    peak_power = max(hourly_avg_w)
-    if peak_power > 500:
-        recommendations.append(f"Peak usage expected around {peak_hour:02d}:00 ({peak_power:.0f} W).")
-    if total_kwh > 5:
-        recommendations.append(f"Projected {total_kwh} kWh — consider turning off AC during unscheduled hours.")
-    if total_kwh <= 1:
-        recommendations.append("Low energy day projected based on historical patterns.")
-    if not recommendations:
-        recommendations.append(f"Normal {dow_labels[target_weekday]} usage projected.")
+    recs = []
+    if peak_power > 500:  recs.append(f"Peak usage expected around {peak_hour:02d}:00 ({peak_power:.0f} W).")
+    if total_kwh > 5:     recs.append(f"Projected {total_kwh} kWh — consider turning off AC during unscheduled hours.")
+    if total_kwh <= 1:    recs.append("Low energy day projected based on historical patterns.")
+    if not recs:          recs.append(f"Normal {dow_labels[target_weekday]} usage projected.")
 
     return jsonify({
-        'success':              True,
-        'date':                 date_param,
-        'day_of_week':          dow_labels[target_weekday],
-        'room':                 room_param,
-        'room_type':            'Laboratory' if room_param.startswith('7') else 'Office/Classroom',
-        'is_zero_day':          False,
-        'total_daily_kWh':      total_kwh,
-        'predicted_rate':       rate,
-        'total_cost_Php':       total_cost,
-        'avg_hourly_kWh':       round(total_kwh / 24, 4),
-        'avg_hourly_cost_Php':  round(total_cost / 24, 2),
-        'hourly_breakdown':     hourly_kwh,
-        'hourly_power_w':       hourly_avg_w,
-        'confidence':           confidence,
-        'recommendations':      recommendations,
-        'data_source':          'energy_dashboard.db',
-        'historical_rows_used': len(parsed_rows),
+        'success': True, 'date': date_param,
+        'day_of_week': dow_labels[target_weekday], 'room': room_param,
+        'room_type': 'Laboratory' if room_param.startswith('7') else 'Office/Classroom',
+        'is_zero_day': False, 'total_daily_kWh': total_kwh, 'predicted_rate': rate,
+        'total_cost_Php': total_cost, 'avg_hourly_kWh': round(total_kwh/24, 4),
+        'avg_hourly_cost_Php': round(total_cost/24, 2),
+        'hourly_breakdown': hourly_kwh, 'hourly_power_w': hourly_avg_w,
+        'confidence': confidence, 'confidence_basis': f"{same_dow_days} {dow_labels[target_weekday]}s in DB",
+        'recommendations': recs,
+        'data_source': 'energy_dashboard.db (fallback)', 'historical_rows_used': len(parsed_rows),
     })
-
 
 
 @app.route('/api/predictive-rooms')
 def predictive_rooms():
-    """Return rooms that actually have energy data in the DB."""
+    if energy_predictor is not None:
+        try:
+            rooms = energy_predictor.get_available_rooms()
+            if rooms:
+                return jsonify({'rooms': rooms, 'source': 'PA3_EnergyPredictor'})
+        except Exception:
+            pass
     try:
         conn = sqlite3.connect(DB_PATH)
-        rows = conn.execute(
-            "SELECT DISTINCT room FROM energy_log ORDER BY room ASC"
-        ).fetchall()
+        rows = conn.execute("SELECT DISTINCT room FROM energy_log ORDER BY room ASC").fetchall()
         conn.close()
-        rooms = [r[0] for r in rows] if rows else ['705']
-        return jsonify({'rooms': rooms})
+        return jsonify({'rooms': [r[0] for r in rows] if rows else ['705'], 'source': 'db'})
     except Exception as e:
         return jsonify({'rooms': ['705'], 'error': str(e)})
 
@@ -1105,7 +1206,7 @@ def predictive_rooms():
 def auto_light_status_api():
     with _auto_light_lock:
         status = dict(auto_light_status)
-    status['person_count']       = person_count_global
+    status['person_count']        = person_count_global
     status['person_gone_timeout'] = PERSON_GONE_TIMEOUT
     with _auto_light_lock:
         last = _last_person_time
@@ -1142,19 +1243,17 @@ def health_check():
     })
 
 
-
-
 # ============================================================================
 # MAIN
 # ============================================================================
 
 if __name__ == '__main__':
     print("=" * 70)
-    print("ENERGY DASHBOARD v4.0 — DB-only mode")
+    print("ENERGY DASHBOARD v5 with ACU monitoring")
     print("=" * 70)
 
     init_db()
-    import_csv_to_db()   # one-time migration of energy_data.csv → DB (safe to re-run)
+    import_csv_to_db()
 
     print(f"Dashboard URL    : http://localhost:5000")
     print(f"ESP32-CAM Stream : {ESP32_CAM_STREAM_URL}")
@@ -1173,6 +1272,10 @@ if __name__ == '__main__':
     esp32_thread = Thread(target=poll_esp32_device, daemon=True)
     esp32_thread.start()
     print("[✓] ESP32 polling thread started")
+
+    monitor_thread = Thread(target=poll_esp32_monitor, daemon=True)
+    monitor_thread.start()
+    print("[✓] Monitor ESP32 polling thread started")
 
     auto_light_thread = Thread(target=auto_light_controller, daemon=True)
     auto_light_thread.start()

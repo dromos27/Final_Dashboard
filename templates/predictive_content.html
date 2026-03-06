@@ -14,7 +14,7 @@
                 <div class="card-body" style="background-color: #FFD700 !important;">
                     <!-- Date Input -->
                     <div class="mb-3">
-                        <label class="form-label fw-bold texat-dark">Date</label>
+                        <label class="form-label fw-bold text-dark">Date</label>
                         <input type="date" id="predict-date-picker" class="form-control"
                                style="background-color: #FFFFFF !important; color: #212121 !important; border: 1px solid #E0E0E0 !important;"
                                value="{{ default_date }}">
@@ -25,7 +25,7 @@
                         <label class="form-label fw-bold text-dark">Room</label>
                         <select id="predict-room-dropdown" class="form-select"
                                 style="background-color: #FFFFFF !important; color: #212121 !important; border: 1px solid #E0E0E0 !important;">
-                            <!-- All rooms will be populated immediately by JavaScript -->
+                            <option value="">Loading rooms…</option>
                         </select>
                     </div>
 
@@ -35,9 +35,9 @@
                         🔮 Predict Energy Usage
                     </button>
 
-                    <!-- Info Text -->
+                    <!-- Info Text — references DB not CSV -->
                     <p class="mt-3 mb-0 text-center" style="color: #616161 !important; font-size: 0.9em;">
-                        Uses AI model and historical data from sample_data.csv
+                        Uses historical data from energy_dashboard.db
                     </p>
                 </div>
             </div>
@@ -50,10 +50,10 @@
                 <div class="card-body" style="background-color: #FFD700 !important; overflow-y: auto;">
                     <ul id="recommendations-list" class="list-unstyled mb-0">
                         <li class="recommendation-item mb-3" style="color: #212121 !important;">
-                            <strong>Enter parameters and click "Predict" to get AI-powered recommendations</strong>
+                            <strong>Enter parameters and click "Predict" to get recommendations</strong>
                         </li>
                         <li class="recommendation-item mb-3" style="color: #616161 !important;">
-                            <small>Based on PA3 Energy Predictor model and historical data</small>
+                            <small>Based on historical energy data from energy_dashboard.db</small>
                         </li>
                     </ul>
                 </div>
@@ -150,20 +150,34 @@
                 <div class="col-md-6">
                     <div class="card" style="border: 2px solid #000000 !important; border-radius: 10px !important;">
                         <div class="card-header" style="background-color: #000000 !important; color: #FFD700 !important; font-weight: bold !important; font-size: 0.9rem;">
-                            Model Confidence
+                            Data Confidence
                         </div>
                         <div class="card-body py-2" style="background-color: #FFD700 !important;">
-                            <div class="d-flex align-items-center">
+                            <div class="d-flex align-items-center mb-1">
                                 <div class="flex-grow-1">
                                     <div class="progress" style="height: 10px; background-color: #E0E0E0;">
                                         <div id="confidence-bar" class="progress-bar"
                                              style="background-color: #000000; width: 0%;"></div>
                                     </div>
                                 </div>
-                                <span id="confidence-value" class="ms-2 fw-bold" style="color: #000000 !important;">
-                                    0%
-                                </span>
+                                <span id="confidence-value" class="ms-2 fw-bold" style="color: #000000 !important;">0%</span>
                             </div>
+                            <small id="confidence-basis" style="color: #616161; font-size: 0.78em;">
+                                Based on historical same-weekday data
+                            </small>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Data source info -->
+            <div class="row mt-3">
+                <div class="col-12">
+                    <div class="card" style="border: 1px solid #00000030 !important; border-radius: 8px !important;">
+                        <div class="card-body py-2 px-3" style="background-color: #FFD70044 !important;">
+                            <small id="data-source-info" style="color: #616161;">
+                                📦 Source: energy_dashboard.db — awaiting prediction
+                            </small>
                         </div>
                     </div>
                 </div>
@@ -173,457 +187,242 @@
 </div>
 
 <script>
-    // Global variables
-    let hourlyChart = null;
+    let hourlyChart  = null;
     let predictionData = null;
 
-    // Define ALL available rooms - both regular and lab rooms
-    const ALL_ROOMS = [
-        '101', '102', '103', '104', '105', '106', '107', '108', '109', '110', '111',
-        '701', '702', '703', '704', '705'
-    ];
-
-    // Initialize when DOM is loaded
-    document.addEventListener('DOMContentLoaded', function() {
-        console.log('Predictive Analytics tab initialized');
-
-        // Immediately populate the dropdown with all rooms
-        populateRoomDropdown(ALL_ROOMS);
-
-        // Also try to load rooms from API to see if there are more
-        loadAvailableRoomsFromAPI();
-
-        // Set up event listeners
+    document.addEventListener('DOMContentLoaded', function () {
+        // Load rooms that actually have data in the DB
+        loadRoomsFromDB();
         setupPredictionListeners();
-
-        // Initialize room type display
-        updateRoomType();
     });
 
-    // Load available rooms from API (optional - for dynamic updates)
-    function loadAvailableRoomsFromAPI() {
+    // ── Rooms — loaded from DB, not hardcoded ─────────────────────────────────
+    function loadRoomsFromDB() {
         fetch('/api/predictive-rooms')
-            .then(response => response.json())
-            .then(data => {
-                if (data.rooms && data.rooms.length > 0) {
-                    console.log('Loaded rooms from API:', data.rooms);
-                    // Check if API returns more rooms than our default list
-                    const apiRooms = data.rooms;
-                    const combinedRooms = [...new Set([...ALL_ROOMS, ...apiRooms])].sort((a, b) => {
-                        return parseInt(a) - parseInt(b);
-                    });
-
-                    if (combinedRooms.length > ALL_ROOMS.length) {
-                        console.log('Found additional rooms from API, updating dropdown');
-                        populateRoomDropdown(combinedRooms);
-                    }
-                }
+            .then(r => r.json())
+            .then(function (data) {
+                const rooms = (data.rooms && data.rooms.length > 0) ? data.rooms : ['705'];
+                populateRoomDropdown(rooms);
             })
-            .catch(error => {
-                console.error('Error loading rooms from API (using default rooms):', error);
+            .catch(function () {
+                // Fallback: just 705 since that's the only room with data
+                populateRoomDropdown(['705']);
             });
     }
 
-    // Populate room dropdown immediately
     function populateRoomDropdown(rooms) {
-        const roomDropdown = document.getElementById('predict-room-dropdown');
-        if (!roomDropdown) return;
-
-        // Clear existing options
-        roomDropdown.innerHTML = '';
-
-        // Add rooms sorted numerically
-        rooms.sort((a, b) => {
-            const aNum = parseInt(a);
-            const bNum = parseInt(b);
-            return aNum - bNum;
-        }).forEach(room => {
+        const dd = document.getElementById('predict-room-dropdown');
+        if (!dd) return;
+        dd.innerHTML = '';
+        rooms.sort((a, b) => parseInt(a) - parseInt(b)).forEach(function (room) {
             const isLab = room.startsWith('7');
-            const option = document.createElement('option');
-            option.value = room;
-            option.textContent = `Room ${room} ${isLab ? '(Lab)' : ''}`;
-            roomDropdown.appendChild(option);
+            const opt   = document.createElement('option');
+            opt.value       = room;
+            opt.textContent = `Room ${room}${isLab ? ' (Lab)' : ''}`;
+            dd.appendChild(opt);
         });
-
-        // Set default value to first lab room if available, otherwise first room
-        const labRooms = rooms.filter(r => r.startsWith('7'));
-        if (labRooms.length > 0) {
-            roomDropdown.value = labRooms[0];
-        } else if (rooms.length > 0) {
-            roomDropdown.value = rooms[0];
-        }
-
+        // Default to first lab room
+        const lab = rooms.find(r => r.startsWith('7'));
+        dd.value = lab || rooms[0];
         updateRoomType();
     }
 
-    // Set up event listeners
+    // ── Event listeners ───────────────────────────────────────────────────────
     function setupPredictionListeners() {
-        const predictButton = document.getElementById('predict-button');
-        const datePicker = document.getElementById('predict-date-picker');
-        const roomDropdown = document.getElementById('predict-room-dropdown');
+        const btn  = document.getElementById('predict-button');
+        const dp   = document.getElementById('predict-date-picker');
+        const dd   = document.getElementById('predict-room-dropdown');
 
-        if (predictButton) {
-            predictButton.addEventListener('click', function() {
+        if (btn) {
+            btn.addEventListener('click', function () {
                 runPrediction();
-
-                // Add click animation
                 this.style.transform = 'scale(0.95)';
-                setTimeout(() => {
-                    this.style.transform = 'scale(1)';
-                }, 150);
-            });
-
-            // Hover effect
-            predictButton.addEventListener('mouseenter', function() {
-                this.style.backgroundColor = '#333333 !important';
-                this.style.boxShadow = '0 4px 8px rgba(0, 0, 0, 0.2)';
-            });
-
-            predictButton.addEventListener('mouseleave', function() {
-                this.style.backgroundColor = '#000000 !important';
-                this.style.boxShadow = 'none';
+                setTimeout(() => { this.style.transform = 'scale(1)'; }, 150);
             });
         }
-
-        if (datePicker) {
-            datePicker.addEventListener('change', function() {
-                // Update prediction if we already have data
-                if (predictionData) {
-                    runPrediction();
-                }
-            });
-        }
-
-        if (roomDropdown) {
-            roomDropdown.addEventListener('change', function() {
-                updateRoomType();
-                // Update prediction if we already have data
-                if (predictionData) {
-                    runPrediction();
-                }
-            });
-        }
+        if (dp)  dp.addEventListener('change',  function () { if (predictionData) runPrediction(); });
+        if (dd)  dd.addEventListener('change',  function () { updateRoomType(); if (predictionData) runPrediction(); });
     }
 
-    // Update room type display
     function updateRoomType() {
-        const roomDropdown = document.getElementById('predict-room-dropdown');
-        const roomTypeElement = document.getElementById('room-type');
-
-        if (roomDropdown && roomTypeElement) {
-            const roomNumber = roomDropdown.value;
-            const isLab = roomNumber.startsWith('7');
-
-            roomTypeElement.textContent = isLab ? 'Laboratory' : 'Office/Classroom';
-            roomTypeElement.style.color = isLab ? '#F44336' : '#000000';
-        }
+        const dd  = document.getElementById('predict-room-dropdown');
+        const el  = document.getElementById('room-type');
+        if (!dd || !el) return;
+        const isLab = dd.value.startsWith('7');
+        el.textContent  = isLab ? 'Laboratory' : 'Office/Classroom';
+        el.style.color  = isLab ? '#F44336' : '#000000';
     }
 
-    // Run prediction using YOUR EnergyPredictor model
+    // ── Prediction ────────────────────────────────────────────────────────────
     function runPrediction() {
-        const datePicker = document.getElementById('predict-date-picker');
-        const roomDropdown = document.getElementById('predict-room-dropdown');
-        const predictButton = document.getElementById('predict-button');
+        const date = document.getElementById('predict-date-picker').value;
+        const room = document.getElementById('predict-room-dropdown').value;
+        const btn  = document.getElementById('predict-button');
 
-        if (!datePicker || !roomDropdown) return;
+        if (!date || !room) return;
 
-        const selectedDate = datePicker.value;
-        const selectedRoom = roomDropdown.value;
+        btn.innerHTML  = '⏳ Predicting…';
+        btn.disabled   = true;
+        document.getElementById('kwh-result').textContent  = '…';
+        document.getElementById('rate-result').textContent = '…';
+        document.getElementById('cost-result').textContent = '…';
 
-        // Show loading state
-        predictButton.innerHTML = '⏳ Predicting...';
-        predictButton.disabled = true;
-
-        // Update metrics to loading
-        document.getElementById('kwh-result').textContent = '...';
-        document.getElementById('rate-result').textContent = '...';
-        document.getElementById('cost-result').textContent = '...';
-
-        // Call YOUR EnergyPredictor API
-        fetch(`/api/predict-energy?date=${selectedDate}&room=${selectedRoom}`)
-            .then(response => {
-                if (!response.ok) {
-                    throw new Error(`API Error: ${response.status}`);
-                }
-                return response.json();
+        fetch(`/api/predict-energy?date=${date}&room=${room}`)
+            .then(function (r) {
+                if (!r.ok) throw new Error(`HTTP ${r.status}`);
+                return r.json();
             })
-            .then(data => {
-                // Process your actual EnergyPredictor response
-                processPredictionResponse(data, selectedRoom, selectedDate);
-
-                // Reset button
-                predictButton.innerHTML = '✅ Prediction Complete!';
-                setTimeout(() => {
-                    predictButton.innerHTML = '🔮 Predict Energy Usage';
-                    predictButton.disabled = false;
+            .then(function (data) {
+                if (!data.success) throw new Error(data.error || 'Prediction failed');
+                processPredictionResponse(data);
+                btn.innerHTML = '✅ Prediction Complete!';
+                setTimeout(function () {
+                    btn.innerHTML = '🔮 Predict Energy Usage';
+                    btn.disabled  = false;
                 }, 1500);
             })
-            .catch(error => {
-                console.error('Prediction error:', error);
-
-                // Fallback to mock data if API fails
-                useFallbackPrediction(selectedDate, selectedRoom);
-
-                // Reset button with error indication
-                predictButton.innerHTML = '⚠️ Using Fallback Data';
-                predictButton.style.backgroundColor = '#F44336 !important';
-                setTimeout(() => {
-                    predictButton.innerHTML = '🔮 Predict Energy Usage';
-                    predictButton.style.backgroundColor = '#000000 !important';
-                    predictButton.disabled = false;
-                }, 2000);
+            .catch(function (err) {
+                console.error('Prediction error:', err);
+                document.getElementById('recommendations-list').innerHTML =
+                    `<li class="recommendation-item mb-3" style="color:#F44336"><strong>⚠️ Error: ${err.message}</strong></li>`;
+                btn.innerHTML = '🔮 Predict Energy Usage';
+                btn.disabled  = false;
             });
     }
 
-    // Process YOUR EnergyPredictor response
-    function processPredictionResponse(data, room, date) {
-        // Extract data from your EnergyPredictor response structure
-        const prediction = {
-            totalKwh: data.total_daily_kWh || data.energy_kWh || 0,
-            rate: data.predicted_rate || data.energy_rate || 11.0,
-            totalCost: data.total_cost_Php || data.energy_cost_Php || 0,
-            avgHourlyKwh: data.avg_hourly_kWh || 0,
-            avgHourlyCost: data.avg_hourly_cost_Php || 0,
-            hourlyBreakdown: data.hourly_breakdown || Array(24).fill(0),
-            recommendations: data.recommendations || ['No recommendations available'],
-            roomType: data.room_type || (room.startsWith('7') ? 'Laboratory' : 'Office'),
-            confidence: data.confidence || data.model_confidence || 85
+    function processPredictionResponse(data) {
+        predictionData = {
+            totalKwh:        data.total_daily_kWh      || 0,
+            rate:            data.predicted_rate        || 11.0,
+            totalCost:       data.total_cost_Php        || 0,
+            avgHourlyKwh:    data.avg_hourly_kWh        || 0,
+            avgHourlyCost:   data.avg_hourly_cost_Php   || 0,
+            hourlyBreakdown: data.hourly_breakdown       || Array(24).fill(0),
+            hourlyPowerW:    data.hourly_power_w         || Array(24).fill(0),
+            recommendations: data.recommendations        || [],
+            roomType:        data.room_type              || 'Unknown',
+            confidence:      data.confidence             || 0,
+            confidenceBasis: data.confidence_basis       || '',
+            isZeroDay:       data.is_zero_day            || false,
+            dayOfWeek:       data.day_of_week            || '',
+            historicalRows:  data.historical_rows_used   || 0,
+            dataSource:      data.data_source            || 'energy_dashboard.db',
         };
-
-        // Store prediction data
-        predictionData = prediction;
-
-        // Update UI
-        updatePredictionUI(prediction);
+        updatePredictionUI(predictionData);
     }
 
-    // Fallback prediction (in case API fails)
-    function useFallbackPrediction(date, room) {
-        // Simple fallback logic
-        const dateObj = new Date(date);
-        const isLab = room.startsWith('7');
-        const isWeekend = dateObj.getDay() === 0 || dateObj.getDay() === 6;
+    function updatePredictionUI(d) {
+        document.getElementById('kwh-result').textContent      = `${d.totalKwh} kWh`;
+        document.getElementById('rate-result').textContent     = `₱${d.rate.toFixed(2)}/kWh`;
+        document.getElementById('cost-result').textContent     = `₱${d.totalCost}`;
+        document.getElementById('avg-hourly-kwh').textContent  = `Avg: ${d.avgHourlyKwh} kWh/hour`;
+        document.getElementById('avg-hourly-cost').textContent = `Avg: ₱${d.avgHourlyCost}/hour`;
 
-        let baseEnergy = isLab ? 25.0 : 15.0;
-        if (isWeekend) baseEnergy *= 0.3;
+        document.getElementById('room-type').textContent       = d.roomType;
+        document.getElementById('room-type').style.color       = d.roomType === 'Laboratory' ? '#F44336' : '#000000';
 
-        const totalKwh = parseFloat(baseEnergy.toFixed(2));
-        const rate = 11.0;
-        const totalCost = parseFloat((totalKwh * rate).toFixed(2));
-
-        const fallbackData = {
-            totalKwh: totalKwh,
-            rate: rate,
-            totalCost: totalCost,
-            avgHourlyKwh: parseFloat((totalKwh / 24).toFixed(3)),
-            avgHourlyCost: parseFloat((totalCost / 24).toFixed(2)),
-            hourlyBreakdown: Array(24).fill(parseFloat((totalKwh / 24).toFixed(3))),
-            recommendations: ['Using fallback prediction model', 'Check API connection'],
-            roomType: isLab ? 'Laboratory' : 'Office',
-            confidence: 65
-        };
-
-        predictionData = fallbackData;
-        updatePredictionUI(fallbackData);
-    }
-
-    // Update UI with prediction data
-    function updatePredictionUI(data) {
-        // Update metric cards
-        document.getElementById('kwh-result').textContent = `${data.totalKwh} kWh`;
-        document.getElementById('rate-result').textContent = `₱${data.rate.toFixed(2)}/kWh`;
-        document.getElementById('cost-result').textContent = `₱${data.totalCost}`;
-
-        // Update average values
-        document.getElementById('avg-hourly-kwh').textContent = `Avg: ${data.avgHourlyKwh} kWh/hour`;
-        document.getElementById('avg-hourly-cost').textContent = `Avg: ₱${data.avgHourlyCost}/hour`;
-
-        // Update room type
-        document.getElementById('room-type').textContent = data.roomType;
-        document.getElementById('room-type').style.color = data.roomType === 'Laboratory' ? '#F44336' : '#000000';
-
-        // Update confidence
-        document.getElementById('confidence-value').textContent = `${data.confidence}%`;
-        document.getElementById('confidence-bar').style.width = `${data.confidence}%`;
+        // Confidence — show real basis
+        document.getElementById('confidence-value').textContent = `${d.confidence}%`;
+        document.getElementById('confidence-bar').style.width   = `${d.confidence}%`;
         document.getElementById('confidence-bar').style.backgroundColor =
-            data.confidence > 80 ? '#4CAF50' : data.confidence > 60 ? '#FF9800' : '#F44336';
+            d.confidence >= 85 ? '#16a34a' : d.confidence >= 65 ? '#f59e0b' : '#ef4444';
+        if (d.confidenceBasis) {
+            document.getElementById('confidence-basis').textContent = `📅 ${d.confidenceBasis}`;
+        }
 
-        // Update recommendations
-        updateRecommendations(data.recommendations);
+        // Data source footer
+        document.getElementById('data-source-info').textContent =
+            `📦 ${d.dataSource} · ${d.historicalRows.toLocaleString()} rows · ${d.dayOfWeek}${d.isZeroDay ? ' · ⚪ Zero-consumption day' : ''}`;
 
-        // Update hourly chart
-        updateHourlyChart(data.hourlyBreakdown);
+        updateRecommendations(d.recommendations);
+        updateHourlyChart(d.hourlyBreakdown, d.dataSource, d.dayOfWeek);
     }
 
-    // Update recommendations list
     function updateRecommendations(recommendations) {
-        const listElement = document.getElementById('recommendations-list');
-
-        if (!listElement) return;
-
-        let html = '';
-        recommendations.forEach((rec, index) => {
-            // Handle both string and object formats
-            const text = typeof rec === 'string' ? rec : rec.text || rec.message || 'Recommendation';
-            const priority = rec.priority || 'medium';
-
-            let icon = '';
-
-            switch(priority) {
-                case 'high':
-                    icon = '⚠️ ';
-                    break;
-                case 'medium':
-                    icon = '💡 ';
-                    break;
-                case 'low':
-                    icon = '✅ ';
-                    break;
-                default:
-                    icon = '📋 ';
-            }
-
-            html += `
-                <li class="recommendation-item mb-3" style="color: #212121 !important;">
-                    <strong>${icon}${text}</strong>
-                </li>
-            `;
-        });
-
-        listElement.innerHTML = html;
+        const el = document.getElementById('recommendations-list');
+        if (!el) return;
+        if (!recommendations || recommendations.length === 0) {
+            el.innerHTML = '<li style="color:#616161"><em>No recommendations.</em></li>';
+            return;
+        }
+        el.innerHTML = recommendations.map(function (rec) {
+            const text = typeof rec === 'string' ? rec : (rec.text || rec.message || String(rec));
+            const icon = text.toLowerCase().includes('peak') ? '⚠️' :
+                         text.toLowerCase().includes('0 kwh') ? '⚪' :
+                         text.toLowerCase().includes('consider') ? '💡' : '📋';
+            return `<li class="recommendation-item mb-3" style="color:#212121"><strong>${icon} ${text}</strong></li>`;
+        }).join('');
     }
 
-    // Update hourly chart
-    function updateHourlyChart(hourlyData) {
+    function updateHourlyChart(hourlyData, dataSource, dayOfWeek) {
         const ctx = document.getElementById('hourlyChart');
+        if (hourlyChart) { hourlyChart.destroy(); hourlyChart = null; }
 
-        // Destroy existing chart if it exists
-        if (hourlyChart) {
-            hourlyChart.destroy();
-        }
+        const labels    = Array.from({length: 24}, (_, i) => `${i.toString().padStart(2,'0')}:00`);
+        const chartData = (hourlyData && hourlyData.length === 24) ? hourlyData : Array(24).fill(0);
 
-        // Create hour labels
-        const hourLabels = [];
-        for (let hour = 0; hour < 24; hour++) {
-            hourLabels.push(`${hour}:00`);
-        }
+        // Determine chart subtitle — honest about data source
+        const isPA3 = dataSource && dataSource.includes('joblib');
+        const subtitle = isPA3
+            ? `Hourly shape based on typical ${dayOfWeek||''} pattern · Daily total from XGBoost`
+            : `Avg hourly power from historical ${dayOfWeek||''} readings in DB`;
 
-        // Ensure we have 24 data points
-        const chartData = hourlyData.length === 24 ? hourlyData :
-                         Array(24).fill(hourlyData.length > 0 ?
-                         hourlyData.reduce((a, b) => a + b, 0) / hourlyData.length : 0);
-
-        // Create new chart
         hourlyChart = new Chart(ctx, {
-            type: 'bar',
+            type: 'line',
             data: {
-                labels: hourLabels,
+                labels: labels,
                 datasets: [{
-                    label: 'Energy Consumption (kWh)',
+                    label: `Predicted kWh — ${subtitle}`,
                     data: chartData,
-                    backgroundColor: 'rgba(0, 0, 0, 0.7)',
-                    borderColor: '#000000',
-                    borderWidth: 1,
-                    borderRadius: 3,
-                    hoverBackgroundColor: '#FFD700'
+                    borderColor: '#000',
+                    backgroundColor: 'rgba(255,215,0,0.12)',
+                    fill: true,
+                    tension: 0.4,
+                    pointRadius: 4,
+                    pointBackgroundColor: '#FFD700',
+                    pointBorderColor: '#000',
+                    pointBorderWidth: 1.5,
+                    borderWidth: 2
                 }]
             },
             options: {
                 responsive: true,
                 maintainAspectRatio: false,
                 plugins: {
-                    legend: {
-                        labels: {
-                            color: '#212121',
-                            font: {
-                                size: 14,
-                                weight: 'bold'
-                            }
-                        }
-                    },
+                    legend: { labels: { color: '#777', font: { size: 11 } } },
                     tooltip: {
-                        backgroundColor: 'rgba(0, 0, 0, 0.8)',
+                        backgroundColor: 'rgba(0,0,0,0.85)',
                         titleColor: '#FFD700',
-                        bodyColor: '#FFFFFF',
+                        bodyColor: '#fff',
                         borderColor: '#FFD700',
                         borderWidth: 1,
                         callbacks: {
-                            label: function(context) {
-                                return `Hour ${context.label}: ${context.parsed.y.toFixed(3)} kWh`;
-                            }
+                            label: c => c.parsed.y.toFixed(4) + ' kWh'
                         }
                     }
                 },
                 scales: {
                     x: {
-                        grid: {
-                            color: 'rgba(224, 224, 224, 0.5)'
-                        },
-                        ticks: {
-                            color: '#212121',
-                            font: {
-                                size: 11
-                            },
-                            maxTicksLimit: 12
-                        },
-                        title: {
-                            display: true,
-                            text: 'Hour of Day',
-                            color: '#212121',
-                            font: {
-                                size: 14,
-                                weight: 'bold'
-                            }
-                        }
+                        grid:  { color: 'rgba(0,0,0,0.04)' },
+                        ticks: { color: '#999', font: { size: 10 }, maxTicksLimit: 12 },
+                        title: { display: true, text: 'Hour of Day', color: '#999', font: { size: 11 } }
                     },
                     y: {
                         beginAtZero: true,
-                        grid: {
-                            color: 'rgba(224, 224, 224, 0.5)'
-                        },
-                        ticks: {
-                            color: '#212121',
-                            font: {
-                                size: 11
-                            },
-                            callback: function(value) {
-                                return value.toFixed(2) + ' kWh';
-                            }
-                        },
-                        title: {
-                            display: true,
-                            text: 'Energy (kWh)',
-                            color: '#212121',
-                            font: {
-                                size: 14,
-                                weight: 'bold'
-                            }
-                        }
+                        grid:  { color: 'rgba(0,0,0,0.04)' },
+                        ticks: { color: '#999', font: { size: 10 }, callback: v => v.toFixed(3) + ' kWh' },
+                        title: { display: true, text: 'Energy (kWh)', color: '#999', font: { size: 11 } }
                     }
                 },
-                interaction: {
-                    intersect: false,
-                    mode: 'index'
-                },
-                animation: {
-                    duration: 1000,
-                    easing: 'easeOutQuart'
-                }
+                interaction: { intersect: false, mode: 'index' },
+                animation: { duration: 800 }
             }
         });
     }
 
-    // Clean up when leaving the tab
     function cleanup() {
-        if (hourlyChart) {
-            hourlyChart.destroy();
-            hourlyChart = null;
-        }
+        if (hourlyChart) { hourlyChart.destroy(); hourlyChart = null; }
     }
 
-    // Export functions for external access if needed
-    window.predictiveTab = {
-        runPrediction: runPrediction,
-        cleanup: cleanup
-    };
+    window.predictiveTab = { runPrediction, cleanup };
 </script>
